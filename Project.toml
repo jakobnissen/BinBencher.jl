@@ -1,0 +1,11 @@
+name = "VambBenchCLI"
+uuid = "b91f9d24-e2a8-4b03-b25e-993ad86b9958"
+authors = ["Jakob Nybo Nissen <jakobnybonissen@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+Comonicon = "863f3e99-da2a-4334-8734-de3dacbe5542"
+VambBenchmarks = "63a9268e-b9e5-4a07-aba6-1f52d4878f75"
+
+[compat]
+Comonicon = "1"
