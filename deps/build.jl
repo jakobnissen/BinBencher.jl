@@ -1,2 +1,2 @@
-using VambBenchCLI;
-VambBenchCLI.comonicon_install();
+using BinBencher;
+BinBencher.comonicon_install();

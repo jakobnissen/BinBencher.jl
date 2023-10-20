@@ -3,9 +3,9 @@
 # Help for the main function
 # Filter for clades?
 
-module VambBenchCLI
+module BinBencher
 
-using VambBenchmarks
+using BinBencherBackend
 using Comonicon: Comonicon
 
 # TODO: This Base piracy is shady as fuck
@@ -17,14 +17,12 @@ function Base.tryparse(::Type{FlagSet}, x::String)
     FlagSet([tryparse(Flag, i) for i in split(x, ',')])
 end
 
-const ALL_FLAGS = FlagSet(instances(Flag))
-
 """
 # Intro
 Benchmark a set of bins agains a reference
 
 # Args
-- `ref`: Path to reference JSON file (see `vambbench makeref`)
+- `ref`: Path to reference JSON file (see the `makeref subcommand`)
 - `bins`: Path to TSV file of bins.
 
 # Options
@@ -49,7 +47,7 @@ Comonicon.@cast function bench(
     sep::Union{String, Nothing}=nothing,
     minsize::Int=1,
     minseqs::Int=1,
-    keep_flags::FlagSet=ALL_FLAGS,
+    keep_flags::FlagSet=FlagSet(),
     remove_flags::FlagSet=FlagSet(),
     recalls::Vector{Float64}=[0.6, 0.7, 0.8, 0.9, 0.95, 0.99],
     precisions::Vector{Float64}=[0.6, 0.7, 0.8, 0.9, 0.95, 0.99],
@@ -79,4 +77,4 @@ end
 
 Comonicon.@main
 
-end # module VambBenchCLI
+end # module BinBencher
