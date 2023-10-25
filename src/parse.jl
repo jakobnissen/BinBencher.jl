@@ -1,48 +1,87 @@
+function taxonomy(x::TaxArgs, genomes::GENOMES_JSON_T)::TAXMAPS_JSON_T
+    paths = x.paths
+    if isnothing(paths)
+        [[(genome_name, "top") for (genome_name, _, _) in genomes]]
+    else
+        taxonomy(paths)
+    end
+end
+
+taxonomy(x::@NamedTuple{json::String}) = open(io -> JSON3.read(io, TAXMAPS_JSON_T), x.json)
+
+function taxonomy(x::@NamedTuple{tax::String, ncbi::String})
+    (; tax, ncbi) = x
+    ncbi_dict = open_perhaps_gzipped(parse_ncbi_taxes, ncbi)
+    open_perhaps_gzipped(io -> parse_taxmaps(io, ncbi_dict), tax)
+end
+
 # child_id => (rank, parent_id, name)
 const NCBI_DICT_T = Dict{Int32, Tuple{Int32, Int32, String}}
 
 # child_id  rank    parent_id   name
 function parse_ncbi_taxes(io::IO)::NCBI_DICT_T
     result = NCBI_DICT_T()
-    for (child_str, rank_str, parent_str, name) in Iterators.map(i -> split(i, '\t'), eachline(io))
-        result[parse(Int32, child_str)] = (parse(Int32, rank_str), parse(Int32, parent_str), name)
+    for (lineno, line) in enumerate(eachline(io))
+        stripped = rstrip(line)
+        isempty(stripped) && continue
+        m = match(r"^(\d+)\t(\d+)\t(\d+)\t([^\t\r\n]+)$", stripped)
+        m === nothing && error(
+            "On line $(lineno), expected line of the form " *
+            "$(raw"^(\d+)\t(\d+)\t(\d+)\t([^\t\r\n]+)$"), " *
+            lazy"but got \"$(stripped)\"",
+        )
+        (child_str, rank_str, parent_str, name) = eachsplit(stripped, '\t')
+        result[parse(Int32, child_str)] =
+            (parse(Int32, rank_str), parse(Int32, parent_str), name)
     end
     result
 end
 
 # strain   child   parent
 # class    child   id=3143
+
+# TODO: How should the user specify: I don't care about higher levels than this?
+# TODO: If the user uses id=XXX, how do we prevent this function from taking too many levels
+# when the user otherwise only uses X levels?
 function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
     result = Dict(i => Dict{String, String}() for i in 0:7)
     for (line_number, line) in enumerate(eachline(io))
         fields = split(rstrip(line), '\t')
         length(fields) == 3 || error(
-            lazy"In taxmaps file, on line $(line_number), expected 3 tab-separated fields, got $(length(fields))"
+            lazy"In taxmaps file, on line $(line_number), " *
+            "expected 3 tab-separated fields, got $(length(fields))",
         )
         (rank_str, child, parent) = fields
         rank = get(RANK_BY_NAME, lowercase(rank_str), 8)
         rank == 8 && error(
-            lazy"Invalid rank name: \"$(rank_str)\". Valid names are:\n$(join(RANKS[1:end-1], \", \"))"
+            lazy"Invalid rank name: \"$(rank_str)\". Valid names are:\n" *
+            lazy"$(join(RANKS[1:end-1], \", \"))",
         )
         if !startswith(parent, "id=")
             existing = get!(result[rank], child, parent)
-            existing == parent || error(lazy"At rank \"$(rank_str)\", child \"$(child)\" is has two distinct parents")
+            existing == parent || error(
+                lazy"At rank \"$(rank_str)\", child \"$(child)\" is has two distinct parents",
+            )
         else
             parent_id = parse(Int, parent[4:end])
             for rank in rank:6
                 lookup = get(ncbi, parent_id, nothing)
                 isnothing(lookup) && error(
-                    lazy"NCBI taxid $(parent_id) is not a known NCBI taxid. Please note that we only accept taxids with a rank " *
-                    lazy"of $(join(RANKS[1:end-1], \", \")). Verify the NCBI taxid, or manually include the taxonomic levels for child $(child)"
+                    lazy"NCBI taxid $(parent_id) is not a known NCBI taxid. " *
+                    "Please note that we only accept taxids with a rank " *
+                    lazy"of $(join(RANKS[1:end-1], \", \")). Verify the NCBI taxid, " *
+                    "or manually include the taxonomic levels for child $(child)",
                 ) # we have only the normal ranks
                 (parent_rank, grandparent_id, parent) = lookup
                 parent_rank == rank + 1 || error(
                     lazy"At rank $(rank_str), NCBI taxid $(parent_id) is listed as a parent. " *
-                    lazy"However, the parent of a $(rank_str) must be a $(RANKS[rank+1]), whereas NCBI tax $(parent_id) is a $(RANKS[parent_rank])"
+                    lazy"However, the parent of a $(rank_str) must be a $(RANKS[rank+1]), " *
+                    "whereas NCBI tax $(parent_id) is a $(RANKS[parent_rank])",
                 )
                 existing = get!(result[rank], child, parent)
                 existing == parent || error(
-                    lazy"At rank $(RANKS[rank]), child \"$(child)\" is listed with multiple distinct parents."
+                    lazy"At rank $(RANKS[rank]), child \"$(child)\" is listed " *
+                    "with multiple distinct parents.",
                 )
                 child = parent
                 parent_id = grandparent_id
@@ -50,7 +89,7 @@ function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
         end
     end
     # Remove empty dicts in result
-    vector = [[(k,v) for (k, v) in d] for d in [result[i] for i in 0:7]]
+    vector = [[(k, v) for (k, v) in d] for d in [result[i] for i in 0:7]]
     while isempty(last(vector))
         pop!(vector)
         isempty(vector) && return vector
@@ -63,88 +102,129 @@ function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
     vector
 end
 
-function empty_taxmaps(x::GENOMES_JSON_T)::TAXMAPS_JSON_T
-    [[(genome_name, "top") for (genome_name, _, _) in x]]
-end
+const BLAST_ROW = @NamedTuple{query::String, subject::String, sstart::Int, send::Int}
 
-
-
-# qseqid     sseqid     qlen     sstart    send
-function parse_sequences_blast(io::IO)::Dict{String, Tuple{Int, Vector{Tuple{String, Int, Int}}}}
-    by_query = Dict{String, Tuple{Int, Vector{Tuple{String, Int, Int}}}}()
+# qseqid     sseqid    sstart    send
+function parse_sequences_blast(io::IO)::Vector{BLAST_ROW}
+    result = BLAST_ROW[]
     for (lineno, line) in enumerate(eachline(io))
         stripped = rstrip(line)
         isempty(stripped) && continue
-        m = match(r"^(\S+)\t(\S+)\t(\d+)\t(\d+)\t(\d+)\t?", stripped)
+        m = match(r"^(\S+)\t(\S+)\t(\d+)\t(\d+)\t?", stripped)
         m === nothing && error(
-            "On line $(lineno), expected line of the form QSEQID \t SSEQID \t QLEN \t SSTART \t SEND [\t FIELDS...] " *
-            lazy"but got \"$(stripped)\""
+            "On line $(lineno), expected line of the form " *
+            "QSEQID \t SSEQID \t SSTART \t SEND [\t FIELDS...] " *
+            lazy"but got \"$(stripped)\"",
         )
-        (query, subject, qlen, sstart, send) = map(something, m.captures)
-        len = parse(Int, qlen)
-        from = parse(Int, sstart)
-        to = parse(Int, send)
-        (from, to) = minmax(from, to)
-        (_, targets) = get!(by_query, query) do
-            (len, Tuple{String, Int, Int}[])
-        end
-        push!(targets, (String(subject), from, to))
+        (query, subject, sstart_str, send_str) = map(something, m.captures)
+        sstart = parse(Int, sstart_str)
+        send = parse(Int, send_str)
+        push!(result, (; query, subject, sstart, send))
     end
-    by_query
+    result
+end
+
+function sequences(
+    blast::Vector{BLAST_ROW},
+    fasta::Vector{Tuple{String, Int}},
+    subject_lengths::Dict{String, Int},
+)::SEQUENCES_JSON_T
+    has_warned = false
+    dict = Dict{String, Tuple{Int, Vector{Tuple{String, Int, Int}}}}()
+    for (identifier, len) in fasta
+        dict[identifier] = (len, Tuple{String, Int, Int}[])
+    end
+    for (; query, subject, sstart, send) in blast
+        slen = get(subject_lengths, subject) do
+            exitwith(
+                "BLAST file contains subject \"$(subject)\", but this was not found " *
+                "when parsing the genomes. Make sure the BLAST file was created by BLASTing " *
+                "against the genome sequences.",
+            )
+        end
+        (qlen, targets) = get(dict, query) do
+            exitwith(
+                "BLAST file contains query \"$(query)\", but this was not found when " *
+                "parsing the sequence FASTA file. Make sure the BLAST file was created " *
+                "using the same sequence FASTA file as query",
+            )
+        end
+        (start, stop) = minmax(sstart, send)
+        # We allow users to BLAST against a set of subjects where each BLAST subject
+        # is the subjects concatenated with themselves. This enables alignments to
+        # "wrap" around the original subjects, simulating an alignment around a circular
+        # subject sequence.
+        # We can detect this happens if stop > slen
+        if stop ≤ slen
+            push!(targets, (subject, start, stop))
+        else
+            stop > 2 * slen && exitwith(
+                "In BLAST file, a BLAST hit spans spans $(start)-$(stop) even though " *
+                "subject \"$(subject)\" only has length $(slen).",
+            )
+            if start > slen
+                push!(targets, (subject, start - slen, stop - slen))
+                continue
+            end
+            span_length = length(start:stop)
+            qlen > 500 &&
+                span_length > 1.25 * qlen &&
+                exitwith(
+                    "In BLAST file, query \"$(query)\" has a hit spanning $(start)-$(stop). " *
+                    "This is more than 125% of the query length $(qlen).",
+                )
+            if !has_warned
+                @info (
+                    "BLAST hit spans $(start)-$(stop) even though subject \"$(subject)\"" *
+                    "only has length $(slen). This will be interpreted as a wrapping alignment. " *
+                    "Please see the documentation for more details."
+                )
+                has_warned = true
+            end
+            push!(targets, (subject, start, stop - slen))
+        end
+    end
+    [(query, len, targets) for (query, (len, targets)) in dict]
 end
 
 function parse_sequences_fasta(io::IO)
-    map(FASTA.Reader(io; copy=false)) do record
-        String(FASTA.identifier(record)), FASTA.seqsize(record)
+    seen_identifiers = Set{String}()
+    FASTA.Reader(io; copy=false) do reader
+        map(reader) do record
+            identifier = String(FASTA.identifier(record))
+            # This is kind of an ugly hack in order to prevent a dual lookup in
+            # the hash set. Ideally, Julia ought to support a way to do this check
+            # using only one lookup.
+            L = length(seen_identifiers)
+            push!(seen_identifiers, identifier)
+            length(seen_identifiers) == L &&
+                exitwith("Duplicate query name in FASTA file: \"$(identifier)\"")
+            (identifier, FASTA.seqsize(record))
+        end
     end
 end
 
-function parse_ref(
-    taxmaps_path::Union{
-        TAXMAPS_JSON_T,
-        Union{Nothing, @NamedTuple{ncbi::String, taxmaps::String}}
-    },
-    blast_path::Union{SEQUENCES_JSON_T, String},
-    genomes::Union{GENOMES_JSON_T, Vector{}},
-)::Reference
-    genomes_json = open_perhaps_gzipped(parse_genomes_fasta, genomes)
-    taxmaps_json = if isnothing(taxmaps)
-        empty_taxmaps(genomes_json)
-    else
-        ncbi_dict = isnothing(ncbi) ? nothing : open_perhaps_gzipped(parse_ncbi_taxes, ncbi)
-        open_perhaps_gzipped(io -> parse_taxmaps(io, ncbi_dict), taxmaps)
-    end
-    seq_json = open_perhaps_gzipped(parse_sequences_blast, sequences)
-    json = ReferenceJSON(1, genomes_json, seq_json, taxmaps_json)
-    Reference(json)
+function sequences(args::SeqArgs, genomes::GENOMES_JSON_T)::SEQUENCES_JSON_T
+    sequences(args.paths, genomes::GENOMES_JSON_T)
 end
 
-# Sequences: BLAST + (name, len) of unblasted seqs??
-# Taxmaps: A manually specified file.
-#     Format: ??
-# Genomes:
-#     [(flagset, directory) ... ] OR
-#     
+function sequences(x::@NamedTuple{json::String}, ::GENOMES_JSON_T)
+    open(io -> JSON3.read(io, SEQUENCES_JSON_T), x.json)
+end
 
-
-
-# (NCBI + taxmaps_file) or genomes => TAXMAPS_JSON_T
-# (
-#    genomes_dir, virus_dir or
-#    raw genomes_json_t?
-# ) => GENOMES_JSON_T
-# blast => SEQUENCES_JSON_T
-
-sequences(args::SeqArgs)::SEQUENCES_JSON_T = sequences(args.paths)
-sequences(x::@NamedTuple{json::String}) = open(io -> JSON3.read(io, SEQUENCES_JSON_T), x.json)
-
-# TODO: Parse the two files concurrently
-function sequences(x::@NamedTuple{blast::String, fasta::String})
-    d = open(parse_sequences_blast, x.blast)
-    for (identifier, len) in open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
-        get!(d, identifier, (len, Tuple{String, Int, Int}[]))
+# TODO: Check if this is type stable
+function sequences(x::@NamedTuple{blast::String, fasta::String}, genomes::GENOMES_JSON_T)
+    a = Threads.@spawn open(parse_sequences_blast, x.blast)
+    b = Threads.@spawn open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
+    blast = fetch(a)
+    fasta = fetch(b)
+    subject_lengths = Dict{String, Int}()
+    for (genome, flags, subjects) in genomes, (subject, len) in subjects
+        haskey(subject_lengths, subject) &&
+            exitwith("Duplicate subject name in genomes: \"$(subject)\"")
+        subject_lengths[subject] = len
     end
-    [(q, L, t) for (q, (L, t)) in d]
+    sequences(blast, fasta, subject_lengths)
 end
 
 genomes(x::GenomeArgs)::GENOMES_JSON_T = genomes(x.x)

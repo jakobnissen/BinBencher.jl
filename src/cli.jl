@@ -6,10 +6,21 @@
 # TODO: This Base piracy is shady as fuck
 Base.tryparse(::Type{Union{Nothing, String}}, x::String) = x
 function Base.tryparse(::Type{Vector{Float64}}, x::String)
-    [parse(Float64, i) for i in split(x, ',')]
+    map(eachsplit(x, ',')) do i
+        @something tryparse(Float64, i) exitwith("Cannot parse as float: \"$(i)\"")
+    end
 end
 function Base.tryparse(::Type{FlagSet}, x::String)
-    FlagSet([tryparse(Flag, i) for i in split(x, ',')])
+    Iterators.map(eachsplit(x, ',')) do str
+        @something tryparse(Flag, str) parse_flag_error(str)
+    end |> FlagSet
+end
+
+function parse_flag_error(s::AbstractString)
+    exitwith(
+        "Cannot parse as flag: \"$(s)\". " *
+        "Available flags are: $(join(instances(Flag), ", "))",
+    )
 end
 
 exitwith(s::AbstractString) = (println(stderr, s); exit(1))
@@ -17,6 +28,8 @@ exitwith(s::AbstractString) = (println(stderr, s); exit(1))
 function checkfile(s::AbstractString, name::AbstractString)
     isfile(s) || exitwith("$(name) does not point to an existing file: \"$(s)\"")
 end
+
+parentdir(dir::AbstractString) = dirname(rstrip(dir, ['\\', '/']))
 
 """
 # Intro
@@ -43,7 +56,7 @@ Benchmark a set of bins agains a reference
 """
 Comonicon.@cast function bench(
     ref::String,
-    bins::String;
+    bins...; # TODO: Explicit type here, but Comonicon issue #261 prevents this
     rank::Int=0,
     sep::Union{String, Nothing}=nothing,
     minsize::Int=1,
@@ -56,26 +69,26 @@ Comonicon.@cast function bench(
     intersect::Bool=false,
 )
     reference = Reference(ref)
-    binning = Binning(
-        bins,
-        reference;
-        binsplit_separator=sep,
-        min_size=minsize,
-        min_seqs=minseqs,
-        disjoint=!intersect,
-        recalls,
-        precisions,
-        filter_genomes=g ->
-            isdisjoint(flags(g), remove_flags) && issubset(keep_flags, flags(g)),
-    )
-    print_matrix(binning; level=rank, assembly=assembly)
+    for path in bins
+        binning = Binning(
+            path,
+            reference;
+            binsplit_separator=sep,
+            min_size=minsize,
+            min_seqs=minseqs,
+            disjoint=!intersect,
+            recalls,
+            precisions,
+            filter_genomes=g ->
+                isdisjoint(flags(g), remove_flags) && issubset(keep_flags, flags(g)),
+        )
+        println(path)
+        print_matrix(binning; level=rank, assembly=assembly)
+    end
 end
 
 struct SeqArgs
-    paths::Union{
-        @NamedTuple{json::String},
-        @NamedTuple{blast::String, fasta::String}
-    }
+    paths::Union{@NamedTuple{json::String}, @NamedTuple{blast::String, fasta::String}}
 
     function SeqArgs(;
         json::Union{String, Nothing},
@@ -83,99 +96,152 @@ struct SeqArgs
         fasta::Union{String, Nothing},
     )
         if !isnothing(json)
-            (isnothing(blast) && isnothing(fasta)) || exitwith("If seq-json-path is set, neither seq-blast-path nor seq-fasta-path can be")
+            (isnothing(blast) && isnothing(fasta)) ||
+                exitwith("If seq-json is set, neither seq-blast nor seq-fasta can be")
             json = expanduser(json)
-            checkfile(json, "seq-json-path")
-            new((;json))
+            checkfile(json, "seq-json")
+            new((; json))
         else
-            isnothing(blast) || isnothing(fasta) && exitwith("If seq-json-path is not set, both seq-fasta-path and seq-blast-path must be")
+            (isnothing(blast) || isnothing(fasta)) &&
+                exitwith("If seq-json is not set, both seq-fasta and seq-blast must be")
             blast = expanduser(blast)
             fasta = expanduser(fasta)
-            checkfile(blast, "seq-blast-path")
-            checkfile(fasta, "seq-fasta-path")
-            new((;blast, fasta))
+            checkfile(blast, "seq-blast")
+            checkfile(fasta, "seq-fasta")
+            new((; blast, fasta))
         end
     end
-end
-
-struct TaxArgs
-    paths::Union{
-        Nothing,
-        @NamedTuple{json::String},
-        @NamedTuple{tax::String, ncbi::Union{String, Nothing}}
-    }
 end
 
 # virus+plasmid=/path/to/these,organism=/path/to/those
 function parse_genomes_dir(s::String)::Vector{Pair{FlagSet, String}}
     map(split(strip(s), ',')) do segment
         p = findfirst(==(UInt8('=')), codeunits(segment))
-        isnothing(p) && exitwith("No =") # TODO
+        isnothing(p) &&
+            exitwith("No \"=\" symbol found in --genome-directories \"$(segment)]\"")
         left = segment[1:prevind(segment, p)]
-        right = segment[p+1:end]
-        flags = map(split(left, '+')) do flag_string
-            @something tryparse(Flag, strip(flag_string)) exitwith("Bad flag $(flag_string)") #TODO
-        end |> FlagSet
+        right = segment[(p + 1):end]
+        flags =
+            map(split(left, '+')) do flag_string
+                @something tryparse(Flag, strip(flag_string)) parse_flag_error(
+                    flag_string,
+                )
+            end |> FlagSet
         flags => expanduser(String(strip(right)))
     end
 end
 
 struct GenomeArgs
-    x::Union{
-        @NamedTuple{json::String},
-        Vector{Pair{FlagSet, String}}
-    }
+    x::Union{@NamedTuple{json::String}, Vector{Pair{FlagSet, String}}}
 
-    function GenomeArgs(json::Union{String, Nothing}, genome_directories::Union{String, Nothing})
+    function GenomeArgs(; json::Union{String, Nothing}, directories::Union{String, Nothing})
         if !isnothing(json)
-            isnothing(genome_directories) || exitwith("If genome-json-path is set, genome-directories must not be set")
+            isnothing(directories) ||
+                exitwith("If genome-json is set, genome-directories must not be set")
             json = expanduser(json)
-            checkfile(json, "genome-json-path")
-            new((;json))
+            checkfile(json, "genome-json")
+            new((; json))
         else
-            isnothing(genome_directories) && exitwith("If genome-json-path is not set, genome-directories must be set")
-            v = parse_genomes_dir(genome_directories)
+            isnothing(directories) &&
+                exitwith("If genome-json is not set, genome-directories must be set")
+            v = parse_genomes_dir(directories)
             seen_flagsets = Set{FlagSet}()
             for (flagset, path) in v
-                flagset ∈ seen_flagsets && exitwith("Foo!") # TODO
+                flagset ∈ seen_flagsets &&
+                    exitwith("Flagset passed twice: $(join(flagset, '+'))")
                 push!(seen_flagsets, flagset)
-                isdir(path) || exitwith("Genome directory does not point to an existing directory: \"$(path)\"")
+                isdir(path) || exitwith(
+                    "Genome directory does not point to an existing directory: \"$(path)\"",
+                )
             end
             new(v)
         end
     end
 end
 
-# BLAST + (contigs file)
-# Taxmaps file, of what precise format?
-# Genomes: 
-#   - [(flagset, dir) ... ]
-#   - Or a way to JSON cast FlagSet to int and have it passed as JSON?
-Comonicon.@cast function makeref(;
-    # Sequences: BLAST path contains mappings from seqs to refs
-    seq_blast_path::Union{String, Nothing}=nothing,
-    # This is for unmapped sequences, so they still appear
-    seq_fasta_path::Union{String, Nothing}=nothing,
-    seq_json_path::Union{String, Nothing}=nothing,
+struct TaxArgs
+    paths::Union{Nothing, @NamedTuple{json::String}, @NamedTuple{tax::String, ncbi::String}}
 
-    # Nothing (flat tax from genomes), or
-    # The special tax path, possibly with the NCBI
-    tax_path::Union{String, Nothing}=nothing,
-    tax_ncbi_path::Union{String, Nothing}=nothing,
-    tax_json_path::Union{String, Nothing}=nothing,
-
-    genome_directories::Union{String, Nothing}=nothing,
-    genome_json_path::Union{String, Nothing}=nothing,
-)
-    #=
-    seq_args = SeqArgs(json=seq_json_path, fasta=seq_fasta_path, blast=seq_blast_path)
-    seqs = sequences(seq_args)
-    println(seqs)
-    =#
-
-    genome_args = GenomeArgs(genome_json_path, genome_directories)
-    gns = genomes(genome_args)
-    println(gns)
+    function TaxArgs(;
+        json::Union{String, Nothing},
+        tax::Union{String, Nothing},
+        ncbi::Union{String, Nothing},
+    )
+        if !isnothing(json)
+            (!isnothing(ncbi) || !isnothing(tax)) &&
+                exitwith("If tax-json is set, tax-ncbi and tax must not be set")
+            json = expanduser(json)
+            checkfile(json, "tax-json")
+            new((; json))
+        elseif !(isnothing(tax) && isnothing(ncbi))
+            (isnothing(tax) || isnothing(ncbi)) &&
+                exitwith("If tax or tax-ncbi is set, both must be set")
+            tax = expanduser(tax)
+            checkfile(tax, "tax")
+            ncbi = expanduser(ncbi)
+            checkfile(ncbi, "tax-ncbi")
+            new((; tax, ncbi))
+        else
+            isnothing(ncbi) || exitwith("If tax is not set, neither must tax-ncbi be")
+            new(nothing)
+        end
+    end
 end
 
+# TODO: Description of this functionality
+Comonicon.@cast function makeref(
+    outdir::String;
+    # BLAST of sequences to genomes
+    seq_blast::Union{String, Nothing}=nothing,
+    # This is for unmapped sequences, so they still appear in reference
+    seq_fasta::Union{String, Nothing}=nothing,
+    # ... or they can pass in the JSON directly
+    seq_json::Union{String, Nothing}=nothing,
 
+    # The special tax file
+    tax::Union{String, Nothing}=nothing,
+    # Path to dump of NCBI - used to parse the `id=412` elements in `tax`
+    tax_ncbi::Union{String, Nothing}=nothing,
+    # ... or they can pass in the JSON directly
+    tax_json::Union{String, Nothing}=nothing,
+
+    # A string of the format
+    # virus+plasmid=/path/to/phasmids,organisms=/path/to/organisms
+    # I.e. (flagset, path) pairs comma-sep, with = to delimit the two, and +
+    # to delimit flags in the flagset.
+    genome_directories::Union{String, Nothing}=nothing,
+    # ... or they can pass in the JSON directly
+    genome_json::Union{String, Nothing}=nothing,
+
+    # Do not error if output directory already exists
+    overwrite::Bool=false,
+)
+    outdir = abspath(expanduser(outdir))
+    isfile(outdir) && exitwith("Output directory \"$(outdir)\" is an existing file")
+    isdir(parentdir(outdir)) ||
+        exitwith("Outdir's parent \"$(parentdir(outdir))\" is not an existing directory")
+    if isdir(outdir)
+        overwrite || exitwith("Output directory \"$(outdir)\" is an existing directory")
+    else
+        mkdir(outdir)
+    end
+
+    seq_args = SeqArgs(; json=seq_json, fasta=seq_fasta, blast=seq_blast)
+    genome_args = GenomeArgs(; json=genome_json, directories=genome_directories)
+    tax_args = TaxArgs(; json=tax_json, ncbi=tax_ncbi, tax)
+
+    gns = genomes(genome_args)
+    isnothing(genome_json) &&
+        open(io -> JSON3.write(io, gns), joinpath(outdir, "genomes.json"), "w")
+    println(gns)
+
+    taxes = taxonomy(tax_args, gns)
+    isnothing(tax) ||
+        open(io -> JSON3.write(io, taxes), joinpath(outdir, "taxonomy.json"), "w")
+    println(taxes)
+
+    seqs = sequences(seq_args, gns)
+    isnothing(seq_json) &&
+        open(io -> JSON3.write(io, seqs), joinpath(outdir, "seqs.json"), "w")
+    println(seqs)
+end
