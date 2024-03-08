@@ -37,12 +37,23 @@ function parse_ncbi_taxes(io::IO)::NCBI_DICT_T
     result
 end
 
+# OR: Maybe easier to set:
+# genome species genus [...] id=3134
+# Minimally two columns. Maximally X columns. Id must be last, and map to the clade above
+
+# Max level: Find maximal level specified on line without id=. (non-ncbi lines)
+# Check all non-ncbi lines have same level
+# Check NCBI lines have at most same level
+# Fill out NCBI lines to match that level
+
 # strain   child   parent
 # class    child   id=3143
 
 # TODO: How should the user specify: I don't care about higher levels than this?
 # TODO: If the user uses id=XXX, how do we prevent this function from taking too many levels
 # when the user otherwise only uses X levels?
+
+
 function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
     result = Dict(i => Dict{String, String}() for i in 0:7)
     for (line_number, line) in enumerate(eachline(io))
@@ -187,7 +198,7 @@ function sequences(
     [(query, len, targets) for (query, (len, targets)) in dict]
 end
 
-function parse_sequences_fasta(io::IO)
+function parse_sequences_fasta(io::IO)::Vector{Tuple{String, Int}}
     seen_identifiers = Set{String}()
     FASTA.Reader(io; copy=false) do reader
         map(reader) do record
@@ -219,7 +230,7 @@ function sequences(x::@NamedTuple{blast::String, fasta::String}, genomes::GENOME
     blast = fetch(a)
     fasta = fetch(b)
     subject_lengths = Dict{String, Int}()
-    for (genome, flags, subjects) in genomes, (subject, len) in subjects
+    for (_, _, subjects) in genomes, (subject, len) in subjects
         haskey(subject_lengths, subject) &&
             exitwith("Duplicate subject name in genomes: \"$(subject)\"")
         subject_lengths[subject] = len
@@ -236,6 +247,7 @@ genomes(x::@NamedTuple{json::String}) = open(io -> JSON3.read(io, GENOMES_JSON_T
 function genomes(directories::Vector{Pair{FlagSet, String}})
     result = GENOMES_JSON_T()
     for (flagset, directory) in directories
+        # TODO: Add warning if any file is not hidden and not of this format
         files = filter!(readdir(directory; join=true)) do path
             any(endswith(path, i) for i in [".fasta", ".fna", ".fa"])
         end

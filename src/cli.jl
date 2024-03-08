@@ -1,3 +1,4 @@
+# TODO
 # Less whitespace in help string - https://github.com/comonicon/Comonicon.jl/issues/256
 # In help string, improve the default value printing
 # Help for the main function
@@ -10,6 +11,7 @@ function Base.tryparse(::Type{Vector{Float64}}, x::String)
         @something tryparse(Float64, i) exitwith("Cannot parse as float: \"$(i)\"")
     end
 end
+
 function Base.tryparse(::Type{FlagSet}, x::String)
     Iterators.map(eachsplit(x, ',')) do str
         @something tryparse(Flag, str) parse_flag_error(str)
@@ -69,8 +71,9 @@ Comonicon.@cast function bench(
     intersect::Bool=false,
 )
     reference = Reference(ref)
-    for path in bins
-        binning = Binning(
+    binnings = Vector{Binning}(undef, length(bins))
+    Threads.@threads for (i, path) in collect(enumerate(bins))
+        binnings[i] = Binning(
             path,
             reference;
             binsplit_separator=sep,
@@ -82,8 +85,10 @@ Comonicon.@cast function bench(
             filter_genomes=g ->
                 isdisjoint(flags(g), remove_flags) && issubset(keep_flags, flags(g)),
         )
+    end
+    for (path, binning) in zip(bins, binnings)
         println(path)
-        print_matrix(binning; level=rank, assembly=assembly)
+        BBB.print_matrix(binning; level=rank, assembly=assembly)
     end
 end
 
@@ -188,7 +193,31 @@ struct TaxArgs
     end
 end
 
-# TODO: Description of this functionality
+"""
+# Intro
+Create a new reference JSON file. See more details in the documentation.
+
+# Args
+- `outdir`: Path to output directory
+
+# Options
+- `--seq-blast`: Path to BLAST file of sequences to genomes
+- `--seq-fasta`: Path to FASTA file of sequences
+- `--seq-json`: JSON file with sequences and their mappings.
+  Incompatible with `seq-blast` and `seq-fasta`
+- `--tax`: Path to TSV file with taxonomy for the genomes
+- `--tax-ncbi`: Optional path to precomputed NCBI dump file
+- `--tax-json`: JSON file with full taxonomy.
+  Incompatible with `tax` and `tax-ncbi`
+- `--genome_directories`: Comma-separated string of `genome+types=path`
+  with the path to a directory of the genomes. Example:
+  `organism=path/to/orgs,virus+plasmid=path/to/phasmids`
+- `--genome-json`: JSON file with all genome information.
+  Incompatible with `--genome-directories`
+
+# Flags
+- `--overwrite`: Do not error if output directory already exists
+"""
 Comonicon.@cast function makeref(
     outdir::String;
     # BLAST of sequences to genomes
