@@ -53,7 +53,6 @@ end
 # TODO: If the user uses id=XXX, how do we prevent this function from taking too many levels
 # when the user otherwise only uses X levels?
 
-
 function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
     result = Dict(i => Dict{String, String}() for i in 0:7)
     for (line_number, line) in enumerate(eachline(io))
@@ -226,7 +225,7 @@ end
 # TODO: Check if this is type stable
 function sequences(
     x::@NamedTuple{default_blast::String, fasta::String},
-    genomes::GENOMES_JSON_T
+    genomes::GENOMES_JSON_T,
 )
     fasta = open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
     blast = open(io -> parse_default_blast(io, Dict(fasta)), x.default_blast)
@@ -242,7 +241,7 @@ end
 # TODO: Check if this is type stable
 function sequences(
     x::@NamedTuple{custom_blast::String, fasta::String},
-    genomes::GENOMES_JSON_T
+    genomes::GENOMES_JSON_T,
 )
     a = Threads.@spawn open(parse_sequences_blast, x.custom_blast)
     b = Threads.@spawn open_perhaps_gzipped(parse_sequences_fasta, x.fasta)

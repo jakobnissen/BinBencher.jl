@@ -4,6 +4,9 @@
 # Help for the main function
 # Filter for clades?
 
+const DEFAULT_RECALLS = [0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
+const DEFAULT_PRECISIONS = [0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
+
 # TODO: This Base piracy is shady as fuck
 Base.tryparse(::Type{Union{Nothing, String}}, x::String) = x
 function Base.tryparse(::Type{Vector{Float64}}, x::String)
@@ -25,13 +28,26 @@ function parse_flag_error(s::AbstractString)
     )
 end
 
-exitwith(s::AbstractString) = (println(stderr, s); exit(1); error()) # TODO: Remove the error in 1.11
+exitwith(s::AbstractString) = (println(stderr, s); exit(1))
 
-function checkfile(s::AbstractString, name::AbstractString)
-    isfile(s) || exitwith("$(name) does not point to an existing file: \"$(s)\"")
+function check_file(s::AbstractString, name::AbstractString)
+    isfile(s) ? s : exitwith("$(name) does not point to an existing file: \"$(s)\"")
 end
 
 parentdir(dir::AbstractString) = dirname(rstrip(dir, ['\\', '/']))
+
+function mkdir_checked(path::String, exists_ok::Bool)
+    if exists_ok
+        isfile(path) && exitwith("Output directory \"$(path)\" is an existing file")
+    else
+        ispath(path) && exitwith("Output directory \"$(path)\" already exists")
+    end
+    parent = parentdir(path)
+    !isempty(parent) &&
+        !isdir(parent) &&
+        exitwith("Outdir's parent \"$(parent)\" is not an existing directory")
+    mkdir(path)
+end
 
 """
 # Intro
@@ -39,10 +55,10 @@ Benchmark a set of bins agains a reference
 
 # Args
 - `ref`: Path to reference JSON file (see the `makeref subcommand`)
-- `bins`: Path to TSV file of bins.
+- `outdir`: Path of output directory to create (must not exist)
+- `bins`: Path to one or more TSV files of bins.
 
 # Options
-- `-r, --rank`: Taxonomic rank to benchmark
 - `-s, --sep`: Binsplit separator; delimiter to split bins
 - `--minsize`: Remove bins with shorter breadth
 - `--minseqs`: Remove bins fewer sequences
@@ -53,26 +69,44 @@ Benchmark a set of bins agains a reference
 - `--precisions`: Comma-separated list of precision thresholds to use
 
 # Flags
-- `--assembly`: Count number of recovered assemblies, not genomes
 - `--intersect`: Allow the same sequence to be in multiple bins
 """
 Comonicon.@cast function bench(
     ref::String,
-    bins...; # TODO: Explicit type here, but Comonicon issue #261 prevents this
-    rank::Int=0,
+    outdir::String,
+    bins...; # name=path strings, or a single path 
     sep::Union{String, Nothing}=nothing,
     minsize::Int=1,
     minseqs::Int=1,
     keep_flags::FlagSet=FlagSet(),
     remove_flags::FlagSet=FlagSet(),
-    recalls::Vector{Float64}=[0.6, 0.7, 0.8, 0.9, 0.95, 0.99],
-    precisions::Vector{Float64}=[0.6, 0.7, 0.8, 0.9, 0.95, 0.99],
-    assembly::Bool=false,
+    recalls::Union{Nothing, Vector{Float64}}=nothing,
+    precisions::Union{Nothing, Vector{Float64}}=nothing,
     intersect::Bool=false,
 )
+    # Check validity of inputs
+    pairs::Union{String, Vector{Pair{String, String}}} = if length(bins) == 1
+        check_file(only(bins), "Binning file")
+    else
+        map(collect(bins)) do i
+            p = split(i, '='; limit=2)
+            length(p) == 1 && exitwith(
+                "If multiple bins files is passed, pass them as e.g. bin1=path_to_bin1.tsv bin2=path_to_bin2.tsv",
+            )
+            # TODO: Handle spaces - perhaps strip quotes?
+            String(p[1]) => String(p[2])
+            #String(p[1]) => String(check_file(p[2], p[1]))
+        end
+    end
+    println(pairs)
+    exit(1)
+    check_file(ref, "Reference")
+    mkdir_checked(outdir, false)
+    settings = OutputSettings(recalls, precisions)
     reference = Reference(ref)
-    binnings = Vector{Binning}(undef, length(bins))
-    Threads.@threads for (i, path) in collect(enumerate(bins))
+    bin_paths::Vector{String} = pairs isa String ? [pairs] : last.(pairs)
+    binnings = Vector{Binning}(undef, length(bin_paths))
+    Threads.@threads for (i, path) in collect(enumerate(bin_paths))
         binnings[i] = Binning(
             path,
             reference;
@@ -80,15 +114,20 @@ Comonicon.@cast function bench(
             min_size=minsize,
             min_seqs=minseqs,
             disjoint=!intersect,
-            recalls,
-            precisions,
+            recalls=settings.recalls,
+            precisions=settings.precisions,
             filter_genomes=g ->
                 isdisjoint(flags(g), remove_flags) && issubset(keep_flags, flags(g)),
         )
     end
-    for (path, binning) in zip(bins, binnings)
-        println(path)
-        BBB.print_matrix(binning; level=rank, assembly=assembly)
+    if pairs isa String
+        populate_output(outdir, only(binnings), settings)
+    else
+        for ((name, _), binning) in zip(pairs, binnings)
+            subdir = joinpath(outdir, name)
+            mkdir_checked(subdir, false)
+            populate_output(subdir, binning, settings)
+        end
     end
 end
 
@@ -109,24 +148,26 @@ struct SeqArgs
             (isnothing(default_blast) && isnothing(custom_blast) && isnothing(fasta)) ||
                 exitwith("If seq-json is set, neither seq-blast nor seq-fasta can be")
             json = expanduser(json)
-            checkfile(json, "seq-json")
+            check_file(json, "seq-json")
             new((; json))
         elseif isnothing(fasta)
             exitwith("If seq-json is not set seq-fasta must be")
         else
             if !(isnothing(default_blast) ⊻ isnothing(custom_blast))
-                exitwith("If seq-json is not set, exactly one of seq-custom-blast and seq-default-blast must be")
+                exitwith(
+                    "If seq-json is not set, exactly one of seq-custom-blast and seq-default-blast must be",
+                )
             end
             fasta = expanduser(fasta)
-            checkfile(fasta, "seq-fasta")
+            check_file(fasta, "seq-fasta")
             if !isnothing(default_blast)
                 default_blast = expanduser(default_blast)
-                checkfile(default_blast, "seq-default-blast")
-                new((;default_blast, fasta))
+                check_file(default_blast, "seq-default-blast")
+                new((; default_blast, fasta))
             else
                 default_blast = expanduser(custom_blast::String)
-                checkfile(custom_blast::String, "seq-custom-blast")
-                new((;custom_blast, fasta))
+                check_file(custom_blast::String, "seq-custom-blast")
+                new((; custom_blast, fasta))
             end
         end
         error("unreachable!")
@@ -159,7 +200,7 @@ struct GenomeArgs
             isnothing(directories) ||
                 exitwith("If genome-json is set, genome-directories must not be set")
             json = expanduser(json)
-            checkfile(json, "genome-json")
+            check_file(json, "genome-json")
             new((; json))
         else
             isnothing(directories) &&
@@ -191,15 +232,15 @@ struct TaxArgs
             (!isnothing(ncbi) || !isnothing(tax)) &&
                 exitwith("If tax-json is set, tax-ncbi and tax must not be set")
             json = expanduser(json)
-            checkfile(json, "tax-json")
+            check_file(json, "tax-json")
             new((; json))
         elseif !(isnothing(tax) && isnothing(ncbi))
             (isnothing(tax) || isnothing(ncbi)) &&
                 exitwith("If tax or tax-ncbi is set, both must be set")
             tax = expanduser(tax)
-            checkfile(tax, "tax")
+            check_file(tax, "tax")
             ncbi = expanduser(ncbi)
-            checkfile(ncbi, "tax-ncbi")
+            check_file(ncbi, "tax-ncbi")
             new((; tax, ncbi))
         else
             isnothing(ncbi) || exitwith("If tax is not set, neither must tax-ncbi be")
@@ -264,16 +305,14 @@ Comonicon.@cast function makeref(
     overwrite::Bool=false,
 )
     outdir = abspath(expanduser(outdir))
-    isfile(outdir) && exitwith("Output directory \"$(outdir)\" is an existing file")
-    isdir(parentdir(outdir)) ||
-        exitwith("Outdir's parent \"$(parentdir(outdir))\" is not an existing directory")
-    if isdir(outdir)
-        overwrite || exitwith("Output directory \"$(outdir)\" is an existing directory")
-    else
-        mkdir(outdir)
-    end
+    mkdir_checked(outdir, overwrite)
 
-    seq_args = SeqArgs(; json=seq_json, fasta=seq_fasta, default_blast=seq_default_blast, custom_blast=seq_custom_blast)
+    seq_args = SeqArgs(;
+        json=seq_json,
+        fasta=seq_fasta,
+        default_blast=seq_default_blast,
+        custom_blast=seq_custom_blast,
+    )
     genome_args = GenomeArgs(; json=genome_json, directories=genome_directories)
     tax_args = TaxArgs(; json=tax_json, ncbi=tax_ncbi, tax)
 

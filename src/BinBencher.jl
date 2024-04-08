@@ -18,10 +18,11 @@ using BinBencherBackend:
 using Comonicon: Comonicon
 using FASTX: FASTA
 using JSON3: JSON3
-using CodecZlib: GzipDecompressorStream
+using CodecZlib: GzipDecompressorStream, GzipCompressorStream
 
 const BBB = BinBencherBackend
 
+include("output.jl")
 include("cli.jl")
 include("parse.jl")
 
