@@ -6,6 +6,7 @@ using BinBencherBackend:
     Reference,
     Binning,
     Flags,
+    Flag,
     flags,
     open_perhaps_gzipped,
     TAXMAPS_JSON_T,

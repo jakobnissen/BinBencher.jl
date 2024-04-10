@@ -25,7 +25,7 @@ function parse_flag_error(s::AbstractString)
     )
 end
 
-exitwith(s::AbstractString) = (println(stderr, s); exit(1))
+exitwith(s::AbstractString) = (println(stderr, s); exit(1); error()) # TODO: Remove the error in 1.11
 
 function checkfile(s::AbstractString, name::AbstractString)
     isfile(s) || exitwith("$(name) does not point to an existing file: \"$(s)\"")
@@ -93,28 +93,43 @@ Comonicon.@cast function bench(
 end
 
 struct SeqArgs
-    paths::Union{@NamedTuple{json::String}, @NamedTuple{blast::String, fasta::String}}
+    paths::Union{
+        @NamedTuple{json::String},
+        @NamedTuple{default_blast::String, fasta::String},
+        @NamedTuple{custom_blast::String, fasta::String},
+    }
 
     function SeqArgs(;
         json::Union{String, Nothing},
-        blast::Union{String, Nothing},
+        default_blast::Union{String, Nothing},
+        custom_blast::Union{String, Nothing},
         fasta::Union{String, Nothing},
     )
         if !isnothing(json)
-            (isnothing(blast) && isnothing(fasta)) ||
+            (isnothing(default_blast) && isnothing(custom_blast) && isnothing(fasta)) ||
                 exitwith("If seq-json is set, neither seq-blast nor seq-fasta can be")
             json = expanduser(json)
             checkfile(json, "seq-json")
             new((; json))
+        elseif isnothing(fasta)
+            exitwith("If seq-json is not set seq-fasta must be")
         else
-            (isnothing(blast) || isnothing(fasta)) &&
-                exitwith("If seq-json is not set, both seq-fasta and seq-blast must be")
-            blast = expanduser(blast)
+            if !(isnothing(default_blast) ⊻ isnothing(custom_blast))
+                exitwith("If seq-json is not set, exactly one of seq-custom-blast and seq-default-blast must be")
+            end
             fasta = expanduser(fasta)
-            checkfile(blast, "seq-blast")
             checkfile(fasta, "seq-fasta")
-            new((; blast, fasta))
+            if !isnothing(default_blast)
+                default_blast = expanduser(default_blast)
+                checkfile(default_blast, "seq-default-blast")
+                new((;default_blast, fasta))
+            else
+                default_blast = expanduser(custom_blast::String)
+                checkfile(custom_blast::String, "seq-custom-blast")
+                new((;custom_blast, fasta))
+            end
         end
+        error("unreachable!")
     end
 end
 
@@ -201,7 +216,8 @@ Create a new reference JSON file. See more details in the documentation.
 - `outdir`: Path to output directory
 
 # Options
-- `--seq-blast`: Path to BLAST file of sequences to genomes
+- `--seq-custom-blast`: Path to BLAST file of sequences to genomes (four-column format)
+- `--seq-default-blast`: Path to BLAST file of sequences to genomes (default tabular)
 - `--seq-fasta`: Path to FASTA file of sequences
 - `--seq-json`: JSON file with sequences and their mappings.
   Incompatible with `seq-blast` and `seq-fasta`
@@ -220,8 +236,10 @@ Create a new reference JSON file. See more details in the documentation.
 """
 Comonicon.@cast function makeref(
     outdir::String;
-    # BLAST of sequences to genomes
-    seq_blast::Union{String, Nothing}=nothing,
+    # BLAST of sequences to genomes (four-column format, see docs)
+    seq_custom_blast::Union{String, Nothing}=nothing,
+    # BLAST of sequences to genomes (default tabular BLAST output)
+    seq_default_blast::Union{String, Nothing}=nothing,
     # This is for unmapped sequences, so they still appear in reference
     seq_fasta::Union{String, Nothing}=nothing,
     # ... or they can pass in the JSON directly
@@ -255,7 +273,7 @@ Comonicon.@cast function makeref(
         mkdir(outdir)
     end
 
-    seq_args = SeqArgs(; json=seq_json, fasta=seq_fasta, blast=seq_blast)
+    seq_args = SeqArgs(; json=seq_json, fasta=seq_fasta, default_blast=seq_default_blast, custom_blast=seq_custom_blast)
     genome_args = GenomeArgs(; json=genome_json, directories=genome_directories)
     tax_args = TaxArgs(; json=tax_json, ncbi=tax_ncbi, tax)
 
