@@ -280,15 +280,12 @@ Comonicon.@cast function makeref(
     gns = genomes(genome_args)
     isnothing(genome_json) &&
         open(io -> JSON3.write(io, gns), joinpath(outdir, "genomes.json"), "w")
-    println(gns)
 
     taxes = taxonomy(tax_args, gns)
     isnothing(tax) ||
         open(io -> JSON3.write(io, taxes), joinpath(outdir, "taxonomy.json"), "w")
-    println(taxes)
 
     seqs = sequences(seq_args, gns)
     isnothing(seq_json) &&
         open(io -> JSON3.write(io, seqs), joinpath(outdir, "seqs.json"), "w")
-    println(seqs)
 end
