@@ -28,9 +28,13 @@ function parse_flag_error(s::AbstractString)
     )
 end
 
-exitwith(s::AbstractString) = (println(stderr, s); exit(1))
+function exitwith(s::AbstractString)
+    @error String(s)
+    exit(1)
+end
 
 function check_file(s::AbstractString, name::AbstractString)
+    @debug "Checking existence of file \"$(s)\""
     isfile(s) ? s : exitwith("$(name) does not point to an existing file: \"$(s)\"")
 end
 
@@ -54,8 +58,8 @@ end
 Benchmark a set of bins agains a reference
 
 # Args
-- `ref`: Path to reference JSON file (see the `makeref subcommand`)
 - `outdir`: Path of output directory to create (must not exist)
+- `ref`: Path to reference JSON file (see the `makeref subcommand`)
 - `bins`: Path to one or more TSV files of bins.
 
 # Options
@@ -72,8 +76,8 @@ Benchmark a set of bins agains a reference
 - `--intersect`: Allow the same sequence to be in multiple bins
 """
 Comonicon.@cast function bench(
-    ref::String,
     outdir::String,
+    ref::String,
     bins...; # name=path strings, or a single path 
     sep::Union{String, Nothing}=nothing,
     minsize::Int=1,
@@ -84,7 +88,10 @@ Comonicon.@cast function bench(
     precisions::Union{Nothing, Vector{Float64}}=nothing,
     intersect::Bool=false,
 )
-    # Check validity of inputs
+    mkdir_checked(outdir, false)
+    create_logger(joinpath(outdir, "log.txt"))
+    @info "Running `bench`"
+    @debug "Checking validity of input paths"
     pairs::Union{String, Vector{Pair{String, String}}} = if length(bins) == 1
         check_file(only(bins), "Binning file")
     else
@@ -93,20 +100,21 @@ Comonicon.@cast function bench(
             length(p) == 1 && exitwith(
                 "If multiple bins files is passed, pass them as e.g. bin1=path_to_bin1.tsv bin2=path_to_bin2.tsv",
             )
-            # TODO: Handle spaces - perhaps strip quotes?
-            String(p[1]) => String(p[2])
-            #String(p[1]) => String(check_file(p[2], p[1]))
+            String(p[1]) => String(check_file(p[2], p[1]))
         end
     end
-    println(pairs)
-    exit(1)
     check_file(ref, "Reference")
-    mkdir_checked(outdir, false)
+    @debug "All files checked"
     settings = OutputSettings(recalls, precisions)
+    @info "Loading reference"
     reference = Reference(ref)
+    @debug "Reference loaded"
     bin_paths::Vector{String} = pairs isa String ? [pairs] : last.(pairs)
     binnings = Vector{Binning}(undef, length(bin_paths))
+    @info "Loading binnings from TSV file(s)"
+    @debug "Loading with $(Threads.nthreads()) threads"
     Threads.@threads for (i, path) in collect(enumerate(bin_paths))
+        @debug "Loading binning at path \"$(path)\""
         binnings[i] = Binning(
             path,
             reference;
@@ -120,15 +128,19 @@ Comonicon.@cast function bench(
                 isdisjoint(flags(g), remove_flags) && issubset(keep_flags, flags(g)),
         )
     end
+    @debug "Done loading binnings"
+    @info "Populating output directory"
     if pairs isa String
         populate_output(outdir, only(binnings), settings)
     else
         for ((name, _), binning) in zip(pairs, binnings)
+            @debug "Populating subdirectory $(name)"
             subdir = joinpath(outdir, name)
             mkdir_checked(subdir, false)
             populate_output(subdir, binning, settings)
         end
     end
+    @info "Done"
 end
 
 struct SeqArgs
