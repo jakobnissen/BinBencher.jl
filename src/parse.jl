@@ -1,3 +1,15 @@
+function tsv_iterator(io::IO, name::AbstractString, header::String)
+    lines = enumerate(eachline(io))
+    lines = Iterators.filter(i -> !isempty(rstrip(last(i))), lines)
+    peeled = Iterators.peel(lines)
+    isnothing(peeled) && exitwith("Found no TSV header when parsing \"$(name)\"")
+    ((_, obs_header), rest) = peeled
+    if rstrip(header) != rstrip(obs_header)
+        exitwith("In $(name), did not find expected header \"$(header)\"")
+    end
+    rest
+end
+
 function taxonomy(x::TaxArgs, genomes::GENOMES_JSON_T)::TAXMAPS_JSON_T
     paths = x.paths
     if isnothing(paths)
@@ -24,11 +36,12 @@ end
 # child_id => (rank, parent_id, name)
 const NCBI_DICT_T = Dict{Int32, Tuple{Int32, Int32, String}}
 
-# child_id  rank    parent_id   name
+const NCBI_HEADER = "child_id\trank\tparent_id\tname"
+
 function parse_ncbi_taxes(io::IO)::NCBI_DICT_T
     @debug "Parsing NCBI taxonomy"
     result = NCBI_DICT_T()
-    for (lineno, line) in enumerate(eachline(io))
+    for (lineno, line) in tsv_iterator(io, "NCBI file", NCBI_HEADER)
         stripped = rstrip(line)
         isempty(stripped) && continue
         m = match(r"^(\d+)\t(\d+)\t(\d+)\t([^\t\r\n]+)$", stripped)
@@ -60,10 +73,13 @@ end
 # TODO: If the user uses id=XXX, how do we prevent this function from taking too many levels
 # when the user otherwise only uses X levels?
 
+const TAX_TSV_HEADER = "rank\tchild\tparent"
+
 function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
-    @debug "Parsing taxonomy TSV file"
     result = Dict(i => Dict{String, String}() for i in 0:7)
-    for (line_number, line) in enumerate(eachline(io))
+    largest_parent_rank_seen = nothing
+
+    for (line_number, line) in tsv_iterator(io, "Taxonomy TSV file", TAX_TSV_HEADER)
         fields = split(rstrip(line), '\t')
         length(fields) == 3 || error(
             lazy"In taxmaps file, on line $(line_number), " *
@@ -80,6 +96,11 @@ function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
             existing == parent || error(
                 lazy"At rank \"$(rank_str)\", child \"$(child)\" is has two distinct parents",
             )
+            largest_parent_rank_seen = if isnothing(largest_parent_rank_seen)
+                rank + 1
+            else
+                max(largest_parent_rank_seen, rank + 1)
+            end
         else
             parent_id = parse(Int, parent[4:end])
             for rank in rank:6
@@ -106,8 +127,15 @@ function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
             end
         end
     end
+    top_rank_to_keep = if isnothing(largest_parent_rank_seen)
+        7
+    else
+        @assert largest_parent_rank_seen < 9
+        largest_parent_rank_seen - 1
+    end
+
     # Remove empty dicts in result
-    vector = [[(k, v) for (k, v) in d] for d in [result[i] for i in 0:7]]
+    vector = [[(k, v) for (k, v) in d] for d in [result[i] for i in 0:top_rank_to_keep]]
     while isempty(last(vector))
         pop!(vector)
         isempty(vector) && return vector
@@ -127,21 +155,7 @@ const EXPECTED_SEQ_TSV_HEADER = "sequence\tsource\tstart\tend"
 # qseqid     sseqid    sstart    send
 function parse_sequences_tsv(io::IO)::Vector{BLAST_ROW}
     result = BLAST_ROW[]
-    lines = Iterators.filter(i -> !isempty(last(i)), enumerate(eachline(io)))
-    lines = let
-        peeled = Iterators.peel(lines)
-        isnothing(peeled) && exitwith(lazy"Empty sequence TSV file")
-        ((_, header), rest) = peeled
-        header = rstrip(header)
-        if header != EXPECTED_SEQ_TSV_HEADER
-            exitwith(
-                lazy"In sequence TSV file, expected header \"$(EXPECTED_SEQ_TSV_HEADER)\"" *
-                lazy", got \"$(header)\"",
-            )
-        end
-        rest
-    end
-    for (lineno, line) in lines
+    for (lineno, line) in tsv_iterator(io, "Sequence TSV file", EXPECTED_SEQ_TSV_HEADER)
         fields = split(line, '\t')
         if length(fields) != 4
             exitwith(

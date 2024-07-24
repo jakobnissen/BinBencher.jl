@@ -89,6 +89,7 @@ function set_global_logger!(paths::Vararg{String})
     end
     logger = LoggingExtras.MinLevelLogger(logger, Logging.Info)
     global_logger(logger)
+    nothing
 end
 
 include("output.jl")
