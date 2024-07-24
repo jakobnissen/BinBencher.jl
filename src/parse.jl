@@ -1,16 +1,22 @@
 function taxonomy(x::TaxArgs, genomes::GENOMES_JSON_T)::TAXMAPS_JSON_T
     paths = x.paths
     if isnothing(paths)
+        @info "No taxonomy passed - skipping loading it"
         [[(genome_name, "top") for (genome_name, _, _) in genomes]]
     else
+        @info "Loading taxonomy"
         taxonomy(paths)
     end
 end
 
-taxonomy(x::@NamedTuple{json::String}) = open(io -> JSON3.read(io, TAXMAPS_JSON_T), x.json)
+function taxonomy(x::@NamedTuple{json::String})
+    @info "Loading taxonomy from JSON file at \"$(x.json)\""
+    open(io -> JSON3.read(io, TAXMAPS_JSON_T), x.json)
+end
 
 function taxonomy(x::@NamedTuple{tax::String, ncbi::String})
     (; tax, ncbi) = x
+    @info "Loading taxonomy file from TSV and NCBI at \"$(tax)\" and \"$(ncbi)\""
     ncbi_dict = open_perhaps_gzipped(parse_ncbi_taxes, ncbi)
     open_perhaps_gzipped(io -> parse_taxmaps(io, ncbi_dict), tax)
 end
@@ -20,6 +26,7 @@ const NCBI_DICT_T = Dict{Int32, Tuple{Int32, Int32, String}}
 
 # child_id  rank    parent_id   name
 function parse_ncbi_taxes(io::IO)::NCBI_DICT_T
+    @debug "Parsing NCBI taxonomy"
     result = NCBI_DICT_T()
     for (lineno, line) in enumerate(eachline(io))
         stripped = rstrip(line)
@@ -54,6 +61,7 @@ end
 # when the user otherwise only uses X levels?
 
 function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
+    @debug "Parsing taxonomy TSV file"
     result = Dict(i => Dict{String, String}() for i in 0:7)
     for (line_number, line) in enumerate(eachline(io))
         fields = split(rstrip(line), '\t')
@@ -114,22 +122,42 @@ end
 
 const BLAST_ROW = @NamedTuple{query::String, subject::String, sstart::Int, send::Int}
 
+const EXPECTED_SEQ_TSV_HEADER = "sequence\tsource\tstart\tend"
+
 # qseqid     sseqid    sstart    send
-function parse_sequences_blast(io::IO)::Vector{BLAST_ROW}
+function parse_sequences_tsv(io::IO)::Vector{BLAST_ROW}
     result = BLAST_ROW[]
-    for (lineno, line) in enumerate(eachline(io))
-        stripped = rstrip(line)
-        isempty(stripped) && continue
-        m = match(r"^(\S+)\t(\S+)\t(\d+)\t(\d+)\t?", stripped)
-        m === nothing && error(
-            "On line $(lineno), expected line of the form " *
-            "QSEQID\\tSSEQID\\tSSTART\\tSEND[\\t FIELDS...] " *
-            lazy"but got \"$(repr(stripped))\"",
-        )
-        (query, subject, sstart_str, send_str) = map(something, m.captures)
-        sstart = parse(Int, sstart_str)
-        send = parse(Int, send_str)
-        push!(result, (; query, subject, sstart, send))
+    lines = Iterators.filter(i -> !isempty(last(i)), enumerate(eachline(io)))
+    lines = let
+        peeled = Iterators.peel(lines)
+        isnothing(peeled) && exitwith(lazy"Empty sequence TSV file")
+        ((_, header), rest) = peeled
+        header = rstrip(header)
+        if header != EXPECTED_SEQ_TSV_HEADER
+            exitwith(
+                lazy"In sequence TSV file, expected header \"$(EXPECTED_SEQ_TSV_HEADER)\"" *
+                lazy", got \"$(header)\"",
+            )
+        end
+        rest
+    end
+    for (lineno, line) in lines
+        fields = split(line, '\t')
+        if length(fields) != 4
+            exitwith(
+                lazy"On line $(lineno) in sequence TSV file, did not get 4 tab-sep columns",
+            )
+        end
+        (sequence, target, start, stop) = fields
+        sstart = tryparse(Int, start)
+        send = tryparse(Int, stop)
+        if isnothing(sstart) || isnothing(send)
+            exitwith(
+                lazy"On line $(lineno) in sequence TSV files, columns 3 and 4 " *
+                "cannot be parsed to `Int`.",
+            )
+        end
+        push!(result, (; query=String(sequence), subject=String(target), sstart, send))
     end
     result
 end
@@ -219,32 +247,17 @@ function sequences(args::SeqArgs, genomes::GENOMES_JSON_T)::SEQUENCES_JSON_T
 end
 
 function sequences(x::@NamedTuple{json::String}, ::GENOMES_JSON_T)
+    @info "Loading sequences from JSON file $(x.json)"
     open(io -> JSON3.read(io, SEQUENCES_JSON_T), x.json)
 end
 
-# TODO: Check if this is type stable
 function sequences(
-    x::@NamedTuple{default_blast::String, fasta::String},
+    x::@NamedTuple{seq_mapping::String, fasta::String},
     genomes::GENOMES_JSON_T,
 )
-    fasta = open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
-    blast = open(io -> parse_default_blast(io, Dict(fasta)), x.default_blast)
-    subject_lengths = Dict{String, Int}()
-    for (_, _, subjects) in genomes, (subject, len) in subjects
-        haskey(subject_lengths, subject) &&
-            exitwith("Duplicate subject name in genomes: \"$(subject)\"")
-        subject_lengths[subject] = len
-    end
-    sequences(blast, fasta, subject_lengths)
-end
-
-# TODO: Check if this is type stable
-function sequences(
-    x::@NamedTuple{custom_blast::String, fasta::String},
-    genomes::GENOMES_JSON_T,
-)
-    a = Threads.@spawn open(parse_sequences_blast, x.custom_blast)
-    b = Threads.@spawn open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
+    @info "Loading sequences from seq mapping $(x.seq_mapping)"
+    a = @spawn open(parse_sequences_tsv, x.seq_mapping)
+    b = @spawn open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
     blast = fetch(a)
     fasta = fetch(b)
     subject_lengths = Dict{String, Int}()
@@ -265,18 +278,20 @@ genomes(x::@NamedTuple{json::String}) = open(io -> JSON3.read(io, GENOMES_JSON_T
 function genomes(directories::Vector{Pair{FlagSet, String}})
     result = GENOMES_JSON_T()
     for (flagset, directory) in directories
+        @debug "Loading genomes from directory \"$(directory)\""
         # TODO: Add warning if any file is not hidden and not of this format
         files = filter!(readdir(directory; join=true)) do path
             any(endswith(path, i) for i in [".fasta", ".fna", ".fa"])
         end
+        @debug "Found $(length(files)) FASTA files in directory \"$(directory)\""
         subdir_result = GENOMES_JSON_T(undef, length(files))
-        Threads.@threads for (subdir_index, path) in collect(enumerate(files))
+        @threads for (subdir_index, path) in collect(enumerate(files))
             (genome_name, _) = splitext(basename(path))
             io = open(path; lock=false)
             io = endswith(path, ".gz") ? GzipDecompressorStream(io) : io
             sources = FASTA.Reader(io; copy=false) do reader
                 map(reader) do record
-                    (FASTA.identifier(record), FASTA.seqsize(record))
+                    (String(FASTA.identifier(record)), FASTA.seqsize(record))
                 end
             end
             subdir_result[subdir_index] = (genome_name, flagset.x, sources)
