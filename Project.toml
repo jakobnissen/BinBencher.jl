@@ -16,8 +16,12 @@ StyledStrings = "f489334b-da3d-4c2e-b8f0-e476e12c162b"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
+BinBencherBackend = "0.3.0"
+CodecZlib = "0.7.6"
 Comonicon = "1"
 Dates = "1.11.0"
+FASTX = "2.1.7"
+JSON3 = "1.14.0"
 Logging = "1.11.0"
 LoggingExtras = "1.0.3"
 StyledStrings = "1.11.0"
