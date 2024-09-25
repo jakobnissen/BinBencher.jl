@@ -33,18 +33,19 @@ function exitwith(s::AbstractString)
 end
 
 function check_file(s::AbstractString, name::AbstractString)
-    @debug "Checking existence of file \"$(s)\""
+    @debug lazy"Checking existence of file \"$(s)\""
     isfile(s) ? s : exitwith("$(name) does not point to an existing file: \"$(s)\"")
 end
 
 function check_dir(s::AbstractString, name::AbstractString)
-    @debug "Checking existence of dir \"$(s)\""
+    @debug lazy"Checking existence of dir \"$(s)\""
     isdir(s) ? s : exitwith("$(name) does not point to an existing directory: \"$(s)\"")
 end
 
 parentdir(dir::AbstractString) = dirname(rstrip(dir, ['\\', '/']))
 
 function mkdir_checked(path::String, exists_ok::Bool)
+    @debug lazy"Attempting to make directory at \"$(path)\""
     if exists_ok
         isfile(path) && exitwith("Output directory \"$(path)\" is an existing file")
     else
@@ -82,7 +83,7 @@ Benchmark a set of bins agains a reference
 Comonicon.@cast function bench(
     outdir::String,
     ref::String,
-    bins...; # name=path strings, or a single path 
+    bins...; # name=path strings, or a single path
     sep::Union{String, Nothing}=nothing,
     minsize::Int=1,
     minseqs::Int=1,
@@ -107,7 +108,6 @@ Comonicon.@cast function bench(
     end
     check_file(ref, "Reference")
     @debug "All files checked"
-    @debug "Making output directory"
     outdir = abspath(expanduser(outdir))
     mkdir_checked(outdir, false)
     @debug "Creating log file"
@@ -138,13 +138,11 @@ Comonicon.@cast function bench(
         )
     end
     @debug "Done loading binnings"
-    @info "Populating output directory"
     if pairs isa String
         populate_output(outdir, only(binnings), settings)
     else
         names_binnings = collect(zip(Iterators.map(first, pairs), binnings))
         @threads for (name, binning) in names_binnings
-            @debug "Populating subdirectory $(name)"
             subdir = joinpath(outdir, name)
             mkdir_checked(subdir, false)
             populate_output(subdir, binning, settings)
@@ -226,30 +224,36 @@ struct GenomeArgs
 end
 
 struct TaxArgs
-    paths::Union{Nothing, @NamedTuple{json::String}, @NamedTuple{tax::String, ncbi::String}}
+    paths::Union{
+        Nothing,
+        @NamedTuple{json::String},
+        @NamedTuple{tax::String, ncbi::Union{Nothing, String}}
+    }
 
     function TaxArgs(;
         json::Union{String, Nothing},
         tax::Union{String, Nothing},
         ncbi::Union{String, Nothing},
     )
-        if !isnothing(json)
-            (!isnothing(ncbi) || !isnothing(tax)) &&
-                exitwith("If tax-json is set, tax-ncbi and tax must not be set")
+        if isnothing(json) && isnothing(tax) && isnothing(ncbi)
+            # If no paths are passed, we create a dummy taxonomy
+            new(nothing)
+        elseif !(isnothing(json) ⊻ isnothing(tax))
+            exitwith("Exactly one of tax-json or tax must be set")
+        elseif !isnothing(json)
+            isnothing(ncbi) || exitwith("If tax-json is set, tax-ncbi must not be set")
             json = expanduser(json)
             check_file(json, "tax-json")
             new((; json))
-        elseif !(isnothing(tax) && isnothing(ncbi))
-            (isnothing(tax) || isnothing(ncbi)) &&
-                exitwith("If tax or tax-ncbi is set, both must be set")
+        else
+            @assert !isnothing(tax)
             tax = expanduser(tax)
             check_file(tax, "tax")
-            ncbi = expanduser(ncbi)
-            check_file(ncbi, "tax-ncbi")
-            new((; tax, ncbi))
-        else
-            isnothing(ncbi) || exitwith("If tax is not set, neither must tax-ncbi be")
-            new(nothing)
+            if !isnothing(ncbi)
+                ncbi = expanduser(ncbi)
+                check_file(ncbi, "tax-ncbi")
+            end
+            new(@NamedTuple{tax::String, ncbi::Union{Nothing, String}}((; tax, ncbi)))
         end
     end
 end
@@ -262,8 +266,7 @@ Create a new reference JSON file. See more details in the documentation.
 - `outdir`: Path to output directory
 
 # Options
-- `--seq-custom-blast`: Path to BLAST file of sequences to genomes (four-column format)
-- `--seq-default-blast`: Path to BLAST file of sequences to genomes (default tabular)
+- `--seq-mapping`: Mapping of sequences to genomes in 4-col TSV file
 - `--seq-fasta`: Path to FASTA file of sequences
 - `--seq-json`: JSON file with sequences and their mappings.
   Incompatible with `seq-blast` and `seq-fasta`
@@ -308,15 +311,13 @@ Comonicon.@cast function makeref(
     overwrite::Bool=false,
 )
     set_global_logger!()
-    start_info()
     @debug "Validating sequence args"
     seq_args = SeqArgs(; json=seq_json, seq_mapping=seq_mapping, fasta=seq_fasta)
     @debug "Validating genome args"
     genome_args = GenomeArgs(; json=genome_json, directories=genome_directories)
     @debug "Validating taxonomy args"
     tax_args = TaxArgs(; json=tax_json, ncbi=tax_ncbi, tax)
-
-    @debug "Making output directory"
+    @debug "All arguments validated"
     outdir = abspath(expanduser(outdir))
     mkdir_checked(outdir, overwrite)
     @debug "Creating log file"

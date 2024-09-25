@@ -7,6 +7,7 @@ function OutputSettings(
     recalls::Union{Vector{Float64}, Nothing},
     precisions::Union{Vector{Float64}, Nothing},
 )
+    @debug "Creating output settings"
     OutputSettings(
         isnothing(recalls) ? DEFAULT_RECALLS : recalls,
         isnothing(precisions) ? DEFAULT_PRECISIONS : precisions,
@@ -18,12 +19,16 @@ function populate_output(
     binning::BBB.Binning,
     settings::OutputSettings,
 )
+    @debug lazy"Populating output directory at $(dir)"
+    @debug "Making stats.json"
     open(joinpath(dir, "stats.json"), "w") do json
         output_stats(json, binning)
     end
+    @debug "Making recovery.json"
     open(joinpath(dir, "recovery.json"), "w") do json
         output_recovery(json, binning, settings)
     end
+    @debug "Making bins.json.gz"
     open(GzipCompressorStream, joinpath(dir, "bins.json.gz"), "w") do json
         d = Dict{String, Any}()
         for bin in binning.bins
@@ -42,7 +47,7 @@ function output_stats(io::IO, binning::BBB.Binning)
     write(io, '\n')
 end
 
-function add_mean_bin_stats!(d::Dict{String, Any}, b::BBB.Binning, precision=5) # TODO: Collapse genomic and asm precision - it's only 1 thing
+function add_mean_bin_stats!(d::Dict{String, Any}, b::BBB.Binning, precision=5)
     for (stats, name) in [(b.bin_genome_stats, "genomic"), (b.bin_asm_stats, "asm")]
         for (metric, field) in [
             ("recall", :mean_bin_recall),
@@ -75,27 +80,6 @@ function output_recovery(io::IO, binning::Binning, settings::OutputSettings)
         end
     end
     JSON3.write(io, json)
-end
-
-function add_passing_bins!(
-    d::Dict{String, Any},
-    b::BBB.Binning,
-    recall::AbstractFloat,
-    precision::AbstractFloat,
-)
-    for rank in 0:(BBB.nranks(b.ref) - 1)
-        rank_suffix = iszero(rank) ? "" : "_rank_" * string(rank)
-
-        # TODO: Proper error if this is not an integer - see the functions
-        d["recovered_genomes" * rank_suffix] =
-            BBB.n_recovered(b, recall, precision; level=rank, assembly=false)::Integer
-        d["recovered_asms" * rank_suffix] =
-            BBB.n_recovered(b, recall, precision; level=rank, assembly=true)::Integer
-        d["passing_bins_genomes" * rank_suffix] =
-            BBB.n_passing_bins(b, recall, precision; level=rank, assembly=false)::Integer
-        d["passing_bins_asms" * rank_suffix] =
-            BBB.n_passing_bins(b, recall, precision; level=rank, assembly=true)::Integer
-    end
 end
 
 function json_bin(bin::BBB.Bin)::Dict{String, Any}

@@ -16,7 +16,7 @@ function taxonomy(x::TaxArgs, genomes::GENOMES_JSON_T)::TAXMAPS_JSON_T
         @info "No taxonomy passed - skipping loading it"
         [[(genome_name, "top") for (genome_name, _, _) in genomes]]
     else
-        @info "Loading taxonomy"
+        @debug "Loading taxonomy"
         taxonomy(paths)
     end
 end
@@ -26,10 +26,16 @@ function taxonomy(x::@NamedTuple{json::String})
     open(io -> JSON3.read(io, TAXMAPS_JSON_T), x.json)
 end
 
-function taxonomy(x::@NamedTuple{tax::String, ncbi::String})
+function taxonomy(x::@NamedTuple{tax::String, ncbi::Union{Nothing, String}})
     (; tax, ncbi) = x
-    @info "Loading taxonomy file from TSV and NCBI at \"$(tax)\" and \"$(ncbi)\""
-    ncbi_dict = open_perhaps_gzipped(parse_ncbi_taxes, ncbi)
+    ncbi_dict = if !isnothing(ncbi)
+        @info "Loading NCBI taxfile at \"$(ncbi)\""
+        open_perhaps_gzipped(parse_ncbi_taxes, ncbi)
+    else
+        @info "No NCBI taxfile passed"
+        nothing
+    end
+    @info "Loading taxonomy file from TSV at \"$(tax)\""
     open_perhaps_gzipped(io -> parse_taxmaps(io, ncbi_dict), tax)
 end
 
@@ -75,7 +81,7 @@ end
 
 const TAX_TSV_HEADER = "rank\tchild\tparent"
 
-function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
+function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_T
     result = Dict(i => Dict{String, String}() for i in 0:7)
     largest_parent_rank_seen = nothing
 
@@ -88,13 +94,15 @@ function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
         (rank_str, child, parent) = fields
         rank = get(RANK_BY_NAME, lowercase(rank_str), 8)
         rank == 8 && error(
+            lazy"In taxmaps file, on line $(line_number), " *
             lazy"Invalid rank name: \"$(rank_str)\". Valid names are:\n" *
             lazy"$(join(RANKS[1:end-1], \", \"))",
         )
         if !startswith(parent, "id=")
             existing = get!(result[rank], child, parent)
             existing == parent || error(
-                lazy"At rank \"$(rank_str)\", child \"$(child)\" is has two distinct parents",
+                lazy"In taxmaps file, on line $(line_number), " *
+                lazy"At rank \"$(rank_str)\", child \"$(child)\" has two distinct parents",
             )
             largest_parent_rank_seen = if isnothing(largest_parent_rank_seen)
                 rank + 1
@@ -102,10 +110,17 @@ function parse_taxmaps(io::IO, ncbi::NCBI_DICT_T)::TAXMAPS_JSON_T
                 max(largest_parent_rank_seen, rank + 1)
             end
         else
+            if isnothing(ncbi)
+                error(
+                    lazy"In tax file, on line $(line_number), the parent is given " *
+                    "as an NCBI tax id. However, the NCBI tax file was not provided.",
+                )
+            end
             parent_id = parse(Int, parent[4:end])
             for rank in rank:6
                 lookup = get(ncbi, parent_id, nothing)
                 isnothing(lookup) && error(
+                    lazy"In taxmaps file, on line $(line_number), " *
                     lazy"NCBI taxid $(parent_id) is not a known NCBI taxid. " *
                     "Please note that we only accept taxids with a rank " *
                     lazy"of $(join(RANKS[1:end-1], \", \")). Verify the NCBI taxid, " *
@@ -181,6 +196,7 @@ function sequences(
     fasta::Vector{Tuple{String, Int}},
     subject_lengths::Dict{String, Int},
 )::SEQUENCES_JSON_T
+    @debug "Constructing sequence object from BLAST results and FASTA"
     has_warned = false
     dict = Dict{String, Tuple{Int, Vector{Tuple{String, Int, Int}}}}()
     for (identifier, len) in fasta
@@ -257,6 +273,7 @@ function parse_sequences_fasta(io::IO)::Vector{Tuple{String, Int}}
 end
 
 function sequences(args::SeqArgs, genomes::GENOMES_JSON_T)::SEQUENCES_JSON_T
+    @debug "Loading sequences"
     sequences(args.paths, genomes::GENOMES_JSON_T)
 end
 
@@ -269,8 +286,9 @@ function sequences(
     x::@NamedTuple{seq_mapping::String, fasta::String},
     genomes::GENOMES_JSON_T,
 )
-    @info "Loading sequences from seq mapping $(x.seq_mapping)"
+    @info lazy"Loading sequence TSV file from seq mapping $(x.seq_mapping)"
     a = @spawn open(parse_sequences_tsv, x.seq_mapping)
+    @info lazy"Loading FASTA file at $(x.fasta)"
     b = @spawn open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
     blast = fetch(a)
     fasta = fetch(b)
@@ -287,9 +305,13 @@ genomes(x::GenomeArgs)::GENOMES_JSON_T = genomes(x.x)
 
 # TODO: This method may need some conversion to support the integer FlagSet, which users
 # may not know how to set.
-genomes(x::@NamedTuple{json::String}) = open(io -> JSON3.read(io, GENOMES_JSON_T), x.json)
+function genomes(x::@NamedTuple{json::String})
+    @info lazy"Loading genomes from JSON file $(x.json)"
+    open(io -> JSON3.read(io, GENOMES_JSON_T), x.json)
+end
 
 function genomes(directories::Vector{Pair{FlagSet, String}})
+    @info "Loading genomes from directories"
     result = GENOMES_JSON_T()
     for (flagset, directory) in directories
         @debug "Loading genomes from directory \"$(directory)\""

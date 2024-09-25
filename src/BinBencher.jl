@@ -37,7 +37,7 @@ const BBB = BinBencherBackend
 const TIME_FORMAT = Dates.DateFormat("HH:mm:SS:sss")
 
 function start_info()
-    @info "BinBencher version v$(VERSION)"
+    @info "Running BinBencher version v$(VERSION)"
     @info "Date is $(Dates.today())"
     @debug "Number of threads: $(nthreads())"
 end
@@ -50,7 +50,6 @@ function is_binbencher_submodule(mod::Module)
     return true
 end
 
-# TODO: Basic information should be printed to the files once created.
 function set_global_logger!(paths::Vararg{String})
     stdout_sink = (
         LoggingExtras.FormatLogger() do io, args
