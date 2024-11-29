@@ -23,12 +23,14 @@ using LoggingExtras: LoggingExtras
 using Logging: Logging, global_logger
 using StyledStrings: @styled_str
 using Dates: Dates
-using TOML: TOML
 using .Threads: @threads, @spawn, nthreads
 
 const VERSION = let
     toml_path = joinpath(dirname(dirname(@__FILE__)), "Project.toml")
-    VersionNumber(TOML.parse(read(toml_path, String))["version"])
+    vline = open(toml_path) do io
+        first(Iterators.filter(startswith("version = "), eachline(io)))
+    end
+    VersionNumber(strip(split(vline, " = ")[end], ['"']))
 end
 
 const BBB = BinBencherBackend
@@ -50,18 +52,18 @@ function is_binbencher_submodule(mod::Module)
     return true
 end
 
-function set_global_logger!(paths::Vararg{String})
-    stdout_sink = (
-        LoggingExtras.FormatLogger() do io, args
-            println(io, args.message)
-        end
-    )
+function set_global_logger!(paths::Vararg{String}; quiet::Bool=false)
+    stderr_sink = LoggingExtras.FormatLogger() do io, args
+        println(io, args.message)
+    end
+    stderr_loglevel = quiet ? Logging.Error : Logging.Info
+    stderr_sink = LoggingExtras.MinLevelLogger(stderr_sink, stderr_loglevel)
     file_sinks = map(paths) do path
         LoggingExtras.FormatLogger(path) do io, args
             println(io, args.message)
         end
     end
-    sinks = (stdout_sink, file_sinks...)
+    sinks = (stderr_sink, file_sinks...)
     logger = LoggingExtras.TeeLogger(sinks...)
     logger = LoggingExtras.TransformerLogger(logger) do log
         prefix = if log.level == Logging.Debug

@@ -1,3 +1,4 @@
+# Iterate nonempty, nonheader lines of IO, checking the header is the argument passed 
 function tsv_iterator(io::IO, name::AbstractString, header::String)
     lines = enumerate(eachline(io))
     lines = Iterators.filter(i -> !isempty(rstrip(last(i))), lines)
@@ -14,6 +15,8 @@ function taxonomy(x::TaxArgs, genomes::GENOMES_JSON_T)::TAXMAPS_JSON_T
     paths = x.paths
     if isnothing(paths)
         @info "No taxonomy passed - skipping loading it"
+        # BinBencher requires at least one Clade which is the ancestor of all genomes,
+        # so we make an artificial one if none is passed.
         [[(genome_name, "top") for (genome_name, _, _) in genomes]]
     else
         @debug "Loading taxonomy"
@@ -49,7 +52,6 @@ function parse_ncbi_taxes(io::IO)::NCBI_DICT_T
     result = NCBI_DICT_T()
     for (lineno, line) in tsv_iterator(io, "NCBI file", NCBI_HEADER)
         stripped = rstrip(line)
-        isempty(stripped) && continue
         m = match(r"^(\d+)\t(\d+)\t(\d+)\t([^\t\r\n]+)$", stripped)
         m === nothing && error(
             "On line $(lineno), expected line of the form " *
@@ -63,26 +65,14 @@ function parse_ncbi_taxes(io::IO)::NCBI_DICT_T
     result
 end
 
-# OR: Maybe easier to set:
-# genome species genus [...] id=3134
-# Minimally two columns. Maximally X columns. Id must be last, and map to the clade above
-
-# Max level: Find maximal level specified on line without id=. (non-ncbi lines)
-# Check all non-ncbi lines have same level
-# Check NCBI lines have at most same level
-# Fill out NCBI lines to match that level
-
-# strain   child   parent
-# class    child   id=3143
-
-# TODO: How should the user specify: I don't care about higher levels than this?
-# TODO: If the user uses id=XXX, how do we prevent this function from taking too many levels
-# when the user otherwise only uses X levels?
-
 const TAX_TSV_HEADER = "rank\tchild\tparent"
 
 function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_T
+    # Rank => (child => parent)
     result = Dict(i => Dict{String, String}() for i in 0:7)
+    # If an NCBI id line (e.g. id=1234) is seen, we autofill all higher ranks.
+    # but we don't want to fill in ranks higher than the highest manually specified
+    # rank, because all genomes must be filled to the same rank.
     largest_parent_rank_seen = nothing
 
     for (line_number, line) in tsv_iterator(io, "Taxonomy TSV file", TAX_TSV_HEADER)
@@ -92,6 +82,8 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
             "expected 3 tab-separated fields, got $(length(fields))",
         )
         (rank_str, child, parent) = fields
+        # For now, we demand that the user uses the classical 7 taxonomic ranks
+        # plus 'strain' (the latter for genomes).
         rank = get(RANK_BY_NAME, lowercase(rank_str), 8)
         rank == 8 && error(
             lazy"In taxmaps file, on line $(line_number), " *
@@ -105,6 +97,7 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
                 lazy"At rank \"$(rank_str)\", child \"$(child)\" has two distinct parents",
             )
             largest_parent_rank_seen = if isnothing(largest_parent_rank_seen)
+                # The rank listed is the child rank, so parent rank is +1
                 rank + 1
             else
                 max(largest_parent_rank_seen, rank + 1)
@@ -117,6 +110,9 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
                 )
             end
             parent_id = parse(Int, parent[4:end])
+            # We fill in all ranks, then we trim away the unused ones at the end
+            # once we've traversed the whole file and know the highest rank manually
+            # given
             for rank in rank:6
                 lookup = get(ncbi, parent_id, nothing)
                 isnothing(lookup) && error(
@@ -125,7 +121,7 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
                     "Please note that we only accept taxids with a rank " *
                     lazy"of $(join(RANKS[1:end-1], \", \")). Verify the NCBI taxid, " *
                     "or manually include the taxonomic levels for child $(child)",
-                ) # we have only the normal ranks
+                ) # we have only the normal ranks (the seven from species to domain)
                 (parent_rank, grandparent_id, parent) = lookup
                 parent_rank == rank + 1 || error(
                     lazy"At rank $(rank_str), NCBI taxid $(parent_id) is listed as a parent. " *
@@ -142,6 +138,7 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
             end
         end
     end
+    # If NO ranks were specified manually, we keep all ranks.
     top_rank_to_keep = if isnothing(largest_parent_rank_seen)
         7
     else
@@ -155,7 +152,7 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
         pop!(vector)
         isempty(vector) && return vector
     end
-    # Add top clade if  there isn't one
+    # Add top clade if there isn't one
     last_parents = unique(map(last, last(vector)))
     if length(last_parents) > 1
         push!(vector, [(p, "top") for p in last_parents])
@@ -167,7 +164,6 @@ const BLAST_ROW = @NamedTuple{query::String, subject::String, sstart::Int, send:
 
 const EXPECTED_SEQ_TSV_HEADER = "sequence\tsource\tstart\tend"
 
-# qseqid     sseqid    sstart    send
 function parse_sequences_tsv(io::IO)::Vector{BLAST_ROW}
     result = BLAST_ROW[]
     for (lineno, line) in tsv_iterator(io, "Sequence TSV file", EXPECTED_SEQ_TSV_HEADER)
@@ -215,6 +211,16 @@ function sequences(
                 "BLAST file contains query \"$(query)\", but this was not found when " *
                 "parsing the sequence FASTA file. Make sure the BLAST file was created " *
                 "using the same sequence FASTA file as query",
+            )
+        end
+        if sstart > send
+            exitwith(
+                "In BLAST file, one line has the start > end position.\n" *
+                "This is not permitted. If you want to signal that the sequence wraps around " *
+                "the 3' end of the source, instead let the end position be longer than the " *
+                "source length.\n" *
+                "E.g. if the source is 100 bp and the sequence wraps from pos 90 to pos 15, " *
+                "specify start and end as 90 and 115, respectively.",
             )
         end
         (start, stop) = minmax(sstart, send)
@@ -289,9 +295,8 @@ function sequences(
     @info lazy"Loading sequence TSV file from seq mapping $(x.seq_mapping)"
     a = @spawn open(parse_sequences_tsv, x.seq_mapping)
     @info lazy"Loading FASTA file at $(x.fasta)"
-    b = @spawn open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
-    blast = fetch(a)
-    fasta = fetch(b)
+    fasta = open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
+    blast = fetch(a)::Vector{BLAST_ROW}
     subject_lengths = Dict{String, Int}()
     for (_, _, subjects) in genomes, (subject, len) in subjects
         haskey(subject_lengths, subject) &&

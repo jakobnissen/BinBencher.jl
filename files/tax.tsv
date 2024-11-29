@@ -1,0 +1,6 @@
+rank	child	parent
+strain	gA	D
+strain	gB	id=1
+strain	gC	E
+species	D	F
+species	E	F

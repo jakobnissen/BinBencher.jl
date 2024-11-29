@@ -79,6 +79,7 @@ Benchmark a set of bins agains a reference
 
 # Flags
 - `--intersect`: Allow the same sequence to be in multiple bins
+- `--quiet`: Disable non-error logging to stderr
 """
 Comonicon.@cast function bench(
     outdir::String,
@@ -92,8 +93,9 @@ Comonicon.@cast function bench(
     recalls::Union{Nothing, Vector{Float64}}=nothing,
     precisions::Union{Nothing, Vector{Float64}}=nothing,
     intersect::Bool=false,
+    quiet::Bool=false,
 )
-    set_global_logger!()
+    set_global_logger!(; quiet)
     @debug "Checking validity of input paths"
     pairs::Union{String, Vector{Pair{String, String}}} = if length(bins) == 1
         check_file(only(bins), "Binning file")
@@ -111,7 +113,7 @@ Comonicon.@cast function bench(
     outdir = abspath(expanduser(outdir))
     mkdir_checked(outdir, false)
     @debug "Creating log file"
-    set_global_logger!(joinpath(outdir, "log.txt"))
+    set_global_logger!(joinpath(outdir, "log.txt"); quiet)
     start_info()
     @info "Running subcommand `bench`"
     settings = OutputSettings(recalls, precisions)
@@ -181,8 +183,9 @@ end
 function parse_genomes_dir(s::String)::Vector{Pair{FlagSet, String}}
     map(split(strip(s), ',')) do segment
         p = findfirst(==(UInt8('=')), codeunits(segment))
-        isnothing(p) &&
-            exitwith("No \"=\" symbol found in --genome-directories \"$(segment)]\"")
+        isnothing(p) && exitwith(
+            "No \"=\" symbol found in --genome-directories cli argument \"$(segment)\"",
+        )
         left = segment[1:prevind(segment, p)]
         right = segment[(p + 1):end]
         flags =
@@ -282,6 +285,7 @@ Create a new reference JSON file. See more details in the documentation.
 
 # Flags
 - `--overwrite`: Do not error if output directory already exists
+- `--quiet`: Disable non-error logging to stderr
 """
 Comonicon.@cast function makeref(
     outdir::String;
@@ -309,8 +313,11 @@ Comonicon.@cast function makeref(
 
     # Do not error if output directory already exists
     overwrite::Bool=false,
+
+    # Disable logging
+    quiet::Bool=false,
 )
-    set_global_logger!()
+    set_global_logger!(; quiet)
     @debug "Validating sequence args"
     seq_args = SeqArgs(; json=seq_json, seq_mapping=seq_mapping, fasta=seq_fasta)
     @debug "Validating genome args"
@@ -321,7 +328,7 @@ Comonicon.@cast function makeref(
     outdir = abspath(expanduser(outdir))
     mkdir_checked(outdir, overwrite)
     @debug "Creating log file"
-    set_global_logger!(joinpath(outdir, "log.txt"))
+    set_global_logger!(joinpath(outdir, "log.txt"); quiet)
     start_info()
     @info "Running subcommand `makeref`"
 
