@@ -100,13 +100,25 @@ Comonicon.@cast function bench(
     pairs::Union{String, Vector{Pair{String, String}}} = if length(bins) == 1
         check_file(only(bins), "Binning file")
     else
-        map(collect(bins)) do i
+        v = map(collect(bins)) do i
             p = split(i, '='; limit=2)
             length(p) == 1 && exitwith(
                 "If multiple bins files is passed, pass them as e.g. bin1=path_to_bin1.tsv bin2=path_to_bin2.tsv",
             )
             String(p[1]) => String(check_file(p[2], p[1]))
         end
+        if !allunique(map(first, v))
+            seen = Set{String}()
+            for (name, _) in v
+                if name in seen
+                    exitwith(
+                        lazy"Multiple binnings have been assigned the same name \"$(name)\"",
+                    )
+                end
+                push!(seen, name)
+            end
+        end
+        v
     end
     check_file(ref, "Reference")
     @debug "All files checked"
@@ -124,7 +136,7 @@ Comonicon.@cast function bench(
     binnings = Vector{Binning}(undef, length(bin_paths))
     @info "Loading binning(s) from TSV file(s)"
     @debug "Loading with $(nthreads()) threads"
-    @threads for (i, path) in collect(enumerate(bin_paths))
+    @threads :greedy for (i, path) in enumerate(bin_paths)
         @debug "Loading binning at path \"$(path)\""
         binnings[i] = Binning(
             path,
