@@ -213,16 +213,9 @@ function sequences(
                 "using the same sequence FASTA file as query",
             )
         end
-        if sstart > send
-            exitwith(
-                "In BLAST file, one line has the start > end position.\n" *
-                "This is not permitted. If you want to signal that the sequence wraps around " *
-                "the 3' end of the source, instead let the end position be longer than the " *
-                "source length.\n" *
-                "E.g. if the source is 100 bp and the sequence wraps from pos 90 to pos 15, " *
-                "specify start and end as 90 and 115, respectively.",
-            )
-        end
+        # Some users might copy the data in this file from a BLAST output file.
+        # BLAST - and other similar tools - will often set sstart > send if the
+        # sequences are reverse-complemented.
         (start, stop) = minmax(sstart, send)
         # We allow users to BLAST against a set of subjects where each BLAST subject
         # is the subjects concatenated with themselves. This enables alignments to
@@ -233,7 +226,7 @@ function sequences(
             push!(targets, (subject, start, stop))
         else
             stop > 2 * slen && exitwith(
-                "In BLAST file, a BLAST hit spans spans $(start)-$(stop) even though " *
+                "In BLAST file, a BLAST hit spans $(start)-$(stop) even though " *
                 "subject \"$(subject)\" only has length $(slen).",
             )
             if start > slen
@@ -245,7 +238,8 @@ function sequences(
                 span_length > 1.25 * qlen &&
                 exitwith(
                     "In BLAST file, query \"$(query)\" has a hit spanning $(start)-$(stop). " *
-                    "This is more than 125% of the query length $(qlen).",
+                    "This is more than 125% of the query length $(qlen), which indicates " *
+                    "a bad alignment",
                 )
             if !has_warned
                 @info (
