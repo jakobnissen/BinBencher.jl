@@ -33,3 +33,6 @@ Add the `bin` folder to your PATH environmental variable to be able run to BinBe
 > applications.
 > There is [recent work to improve this](https://github.com/JuliaLang/Pkg.jl/pull/3772), so hopefully BinBencher will be easier
 > to install and run by the time the work is done some time in 2025.
+
+## Files
+The NCBI taxonomy file can be found on [the releases page](https://github.com/jakobnissen/BinBencher.jl/releases/).
