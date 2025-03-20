@@ -9,7 +9,7 @@ const DEFAULT_PRECISIONS = [0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
 # TODO: This Base piracy is shady as fuck
 Base.tryparse(::Type{Union{Nothing, String}}, x::String) = x
 function Base.tryparse(::Type{Vector{Float64}}, x::String)
-    map(eachsplit(x, ',')) do i
+    return map(eachsplit(x, ',')) do i
         @something tryparse(Float64, i) exitwith("Cannot parse as float: \"$(i)\"")
     end
 end
@@ -21,25 +21,25 @@ function Base.tryparse(::Type{FlagSet}, x::String)
 end
 
 function parse_flag_error(s::AbstractString)
-    exitwith(
+    return exitwith(
         "Cannot parse as flag: \"$(s)\". " *
-        "Available flags are: $(join(instances(Flag), ", "))",
+            "Available flags are: $(join(instances(Flag), ", "))",
     )
 end
 
 function exitwith(s::AbstractString)
     @error String(s)
-    exit(1)
+    return exit(1)
 end
 
 function check_file(s::AbstractString, name::AbstractString)
     @debug lazy"Checking existence of file \"$(s)\""
-    isfile(s) ? s : exitwith("$(name) does not point to an existing file: \"$(s)\"")
+    return isfile(s) ? s : exitwith("$(name) does not point to an existing file: \"$(s)\"")
 end
 
 function check_dir(s::AbstractString, name::AbstractString)
     @debug lazy"Checking existence of dir \"$(s)\""
-    isdir(s) ? s : exitwith("$(name) does not point to an existing directory: \"$(s)\"")
+    return isdir(s) ? s : exitwith("$(name) does not point to an existing directory: \"$(s)\"")
 end
 
 parentdir(dir::AbstractString) = dirname(rstrip(dir, ['\\', '/']))
@@ -55,7 +55,7 @@ function mkdir_checked(path::String, exists_ok::Bool)
     !isempty(parent) &&
         !isdir(parent) &&
         exitwith("Outdir's parent \"$(parent)\" is not an existing directory")
-    mkdir(path)
+    return mkdir(path)
 end
 
 """
@@ -82,26 +82,26 @@ Benchmark a set of bins agains a reference
 - `--quiet`: Disable non-error logging to stderr
 """
 Comonicon.@cast function bench(
-    outdir::String,
-    ref::String,
-    bins...; # name=path strings, or a single path
-    sep::Union{String, Nothing}=nothing,
-    minsize::Int=1,
-    minseqs::Int=1,
-    keep_flags::FlagSet=FlagSet(),
-    remove_flags::FlagSet=FlagSet(),
-    recalls::Union{Nothing, Vector{Float64}}=nothing,
-    precisions::Union{Nothing, Vector{Float64}}=nothing,
-    intersect::Bool=false,
-    quiet::Bool=false,
-)
+        outdir::String,
+        ref::String,
+        bins...; # name=path strings, or a single path
+        sep::Union{String, Nothing} = nothing,
+        minsize::Int = 1,
+        minseqs::Int = 1,
+        keep_flags::FlagSet = FlagSet(),
+        remove_flags::FlagSet = FlagSet(),
+        recalls::Union{Nothing, Vector{Float64}} = nothing,
+        precisions::Union{Nothing, Vector{Float64}} = nothing,
+        intersect::Bool = false,
+        quiet::Bool = false,
+    )
     set_global_logger!(; quiet)
     @debug "Checking validity of input paths"
     pairs::Union{String, Vector{Pair{String, String}}} = if length(bins) == 1
         check_file(only(bins), "Binning file")
     else
         v = map(collect(bins)) do i
-            p = split(i, '='; limit=2)
+            p = split(i, '='; limit = 2)
             length(p) == 1 && exitwith(
                 "If multiple bins files is passed, pass them as e.g. bin1=path_to_bin1.tsv bin2=path_to_bin2.tsv",
             )
@@ -130,8 +130,13 @@ Comonicon.@cast function bench(
     @info "Running subcommand `bench`"
     settings = OutputSettings(recalls, precisions)
     @info "Loading reference"
-    reference = Reference(ref)
+    refdata = open(read, ref)
+    reference = Reference(IOBuffer(refdata))
     @debug "Reference loaded"
+    @debug "Computing reference CRC32c"
+    checksum = crc32c(refdata)
+    @info "Reference file CRC32c: $(string(checksum, base = 16))"
+    resize!(refdata, 0) # save memory
     bin_paths::Vector{String} = pairs isa String ? [pairs] : last.(pairs)
     binnings = Vector{Binning}(undef, length(bin_paths))
     @info "Loading binning(s) from TSV file(s)"
@@ -141,14 +146,14 @@ Comonicon.@cast function bench(
         binnings[i] = Binning(
             path,
             reference;
-            binsplit_separator=sep,
-            min_size=minsize,
-            min_seqs=minseqs,
-            disjoint=!intersect,
-            recalls=settings.recalls,
-            precisions=settings.precisions,
-            filter_genomes=g ->
-                isdisjoint(flags(g), remove_flags) && issubset(keep_flags, flags(g)),
+            binsplit_separator = sep,
+            min_size = minsize,
+            min_seqs = minseqs,
+            disjoint = !intersect,
+            recalls = settings.recalls,
+            precisions = settings.precisions,
+            filter_genomes = g ->
+            isdisjoint(flags(g), remove_flags) && issubset(keep_flags, flags(g)),
         )
     end
     @debug "Done loading binnings"
@@ -169,11 +174,11 @@ struct SeqArgs
     paths::Union{@NamedTuple{json::String}, @NamedTuple{seq_mapping::String, fasta::String}}
 
     function SeqArgs(;
-        json::Union{String, Nothing},
-        seq_mapping::Union{String, Nothing},
-        fasta::Union{String, Nothing},
-    )
-        if !isnothing(json)
+            json::Union{String, Nothing},
+            seq_mapping::Union{String, Nothing},
+            fasta::Union{String, Nothing},
+        )
+        return if !isnothing(json)
             (isnothing(seq_mapping) && isnothing(fasta)) ||
                 exitwith("If seq-json is set, neither seq-blast nor seq-fasta can be")
             json = expanduser(json)
@@ -193,7 +198,7 @@ end
 
 # virus+plasmid=/path/to/these,organism=/path/to/those
 function parse_genomes_dir(s::String)::Vector{Pair{FlagSet, String}}
-    map(split(strip(s), ',')) do segment
+    return map(split(strip(s), ',')) do segment
         p = findfirst(==(UInt8('=')), codeunits(segment))
         isnothing(p) && exitwith(
             "No \"=\" symbol found in --genome-directories cli argument \"$(segment)\"",
@@ -202,10 +207,10 @@ function parse_genomes_dir(s::String)::Vector{Pair{FlagSet, String}}
         right = segment[(p + 1):end]
         flags =
             map(split(left, '+')) do flag_string
-                @something tryparse(Flag, strip(flag_string)) parse_flag_error(
-                    flag_string,
-                )
-            end |> FlagSet
+            @something tryparse(Flag, strip(flag_string)) parse_flag_error(
+                flag_string,
+            )
+        end |> FlagSet
         flags => expanduser(String(strip(right)))
     end
 end
@@ -214,7 +219,7 @@ struct GenomeArgs
     x::Union{@NamedTuple{json::String}, Vector{Pair{FlagSet, String}}}
 
     function GenomeArgs(; json::Union{String, Nothing}, directories::Union{String, Nothing})
-        if !isnothing(json)
+        return if !isnothing(json)
             @debug "Validating genome args as JSON"
             isnothing(directories) ||
                 exitwith("If genome-json is set, genome-directories must not be set")
@@ -246,11 +251,11 @@ struct TaxArgs
     }
 
     function TaxArgs(;
-        json::Union{String, Nothing},
-        tax::Union{String, Nothing},
-        ncbi::Union{String, Nothing},
-    )
-        if isnothing(json) && isnothing(tax) && isnothing(ncbi)
+            json::Union{String, Nothing},
+            tax::Union{String, Nothing},
+            ncbi::Union{String, Nothing},
+        )
+        return if isnothing(json) && isnothing(tax) && isnothing(ncbi)
             # If no paths are passed, we create a dummy taxonomy
             new(nothing)
         elseif !(isnothing(json) ⊻ isnothing(tax))
@@ -300,42 +305,42 @@ Create a new reference JSON file. See more details in the documentation.
 - `--quiet`: Disable non-error logging to stderr
 """
 Comonicon.@cast function makeref(
-    outdir::String;
-    # Mapping of sequences to genomes (four-column format, see docs)
-    seq_mapping::Union{String, Nothing}=nothing,
-    # This is for unmapped sequences, so they still appear in reference
-    seq_fasta::Union{String, Nothing}=nothing,
-    # ... or they can pass in the JSON directly
-    seq_json::Union{String, Nothing}=nothing,
+        outdir::String;
+        # Mapping of sequences to genomes (four-column format, see docs)
+        seq_mapping::Union{String, Nothing} = nothing,
+        # This is for unmapped sequences, so they still appear in reference
+        seq_fasta::Union{String, Nothing} = nothing,
+        # ... or they can pass in the JSON directly
+        seq_json::Union{String, Nothing} = nothing,
 
-    # The special tax file
-    tax::Union{String, Nothing}=nothing,
-    # Path to dump of NCBI - used to parse the `id=412` elements in `tax`
-    tax_ncbi::Union{String, Nothing}=nothing,
-    # ... or they can pass in the JSON directly
-    tax_json::Union{String, Nothing}=nothing,
+        # The special tax file
+        tax::Union{String, Nothing} = nothing,
+        # Path to dump of NCBI - used to parse the `id=412` elements in `tax`
+        tax_ncbi::Union{String, Nothing} = nothing,
+        # ... or they can pass in the JSON directly
+        tax_json::Union{String, Nothing} = nothing,
 
-    # A string of the format
-    # virus+plasmid=/path/to/phasmids,organisms=/path/to/organisms
-    # I.e. (flagset, path) pairs comma-sep, with = to delimit the two, and +
-    # to delimit flags in the flagset.
-    genome_directories::Union{String, Nothing}=nothing,
-    # ... or they can pass in the JSON directly
-    genome_json::Union{String, Nothing}=nothing,
+        # A string of the format
+        # virus+plasmid=/path/to/phasmids,organisms=/path/to/organisms
+        # I.e. (flagset, path) pairs comma-sep, with = to delimit the two, and +
+        # to delimit flags in the flagset.
+        genome_directories::Union{String, Nothing} = nothing,
+        # ... or they can pass in the JSON directly
+        genome_json::Union{String, Nothing} = nothing,
 
-    # Do not error if output directory already exists
-    overwrite::Bool=false,
+        # Do not error if output directory already exists
+        overwrite::Bool = false,
 
-    # Disable logging
-    quiet::Bool=false,
-)
+        # Disable logging
+        quiet::Bool = false,
+    )
     set_global_logger!(; quiet)
     @debug "Validating sequence args"
-    seq_args = SeqArgs(; json=seq_json, seq_mapping=seq_mapping, fasta=seq_fasta)
+    seq_args = SeqArgs(; json = seq_json, seq_mapping = seq_mapping, fasta = seq_fasta)
     @debug "Validating genome args"
-    genome_args = GenomeArgs(; json=genome_json, directories=genome_directories)
+    genome_args = GenomeArgs(; json = genome_json, directories = genome_directories)
     @debug "Validating taxonomy args"
-    tax_args = TaxArgs(; json=tax_json, ncbi=tax_ncbi, tax)
+    tax_args = TaxArgs(; json = tax_json, ncbi = tax_ncbi, tax)
     @debug "All arguments validated"
     outdir = abspath(expanduser(outdir))
     mkdir_checked(outdir, overwrite)

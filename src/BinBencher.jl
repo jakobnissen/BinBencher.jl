@@ -24,6 +24,7 @@ using Logging: Logging, global_logger
 using StyledStrings: @styled_str
 using Dates: Dates
 using .Threads: @threads, @spawn, nthreads
+using CRC32c: crc32c
 
 const VERSION = let
     toml_path = joinpath(dirname(dirname(@__FILE__)), "Project.toml")
@@ -41,7 +42,7 @@ const TIME_FORMAT = Dates.DateFormat("HH:mm:SS:sss")
 function start_info()
     @info "Running BinBencher version v$(VERSION)"
     @info "Date is $(Dates.today())"
-    @debug "Number of threads: $(nthreads())"
+    return @debug "Number of threads: $(nthreads())"
 end
 
 function is_binbencher_submodule(mod::Module)
@@ -52,7 +53,7 @@ function is_binbencher_submodule(mod::Module)
     return true
 end
 
-function set_global_logger!(paths::Vararg{String}; quiet::Bool=false)
+function set_global_logger!(paths::Vararg{String}; quiet::Bool = false)
     stderr_sink = LoggingExtras.FormatLogger() do io, args
         println(io, args.message)
     end
@@ -80,8 +81,8 @@ function set_global_logger!(paths::Vararg{String}; quiet::Bool=false)
         merge(
             log,
             (;
-                message=prefix *
-                        " $(Dates.format(Dates.now(), TIME_FORMAT)) | $(log.message)"
+                message = prefix *
+                    " $(Dates.format(Dates.now(), TIME_FORMAT)) | $(log.message)",
             ),
         )
     end
@@ -90,7 +91,7 @@ function set_global_logger!(paths::Vararg{String}; quiet::Bool=false)
     end
     logger = LoggingExtras.MinLevelLogger(logger, Logging.Info)
     global_logger(logger)
-    nothing
+    return nothing
 end
 
 include("output.jl")

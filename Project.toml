@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [deps]
 BinBencherBackend = "63a9268e-b9e5-4a07-aba6-1f52d4878f75"
+CRC32c = "8bf52ea8-c179-5cab-976a-9e18b702a9bc"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 Comonicon = "863f3e99-da2a-4334-8734-de3dacbe5542"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -16,6 +17,7 @@ StyledStrings = "f489334b-da3d-4c2e-b8f0-e476e12c162b"
 
 [compat]
 BinBencherBackend = "0.3.2"
+CRC32c = "1.11.0"
 CodecZlib = "0.7.6"
 Comonicon = "1"
 Dates = "1.11.0"
