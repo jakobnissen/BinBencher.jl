@@ -24,3 +24,7 @@ Add the `bin` folder to your `$PATH` environmental variable to be able run to Bi
 1. Go to [the releases page](https://github.com/jakobnissen/BinBencher.jl/releases/tag/filesv1) and download the file `inputs.tar.gz`.
 2. Extract the tar archive with `tar -xzvf inputs.tar.gz`
 3. Run BinBencher with the command `binbench bench out reference.json bins.tsv`
+
+## Existing datasets
+* CAMI2 toy human microbiome short read gold standard assembly: https://zenodo.org/records/15083711
+* NCBI file: https://github.com/jakobnissen/BinBencher.jl/releases/download/filesv1/ncbi.tsv.gz
