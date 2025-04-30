@@ -8,11 +8,6 @@ const DEFAULT_PRECISIONS = [0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
 
 # TODO: This Base piracy is shady as fuck
 Base.tryparse(::Type{Union{Nothing, String}}, x::String) = x
-function Base.tryparse(::Type{Vector{Float64}}, x::String)
-    return map(eachsplit(x, ',')) do i
-        @something tryparse(Float64, i) exitwith("Cannot parse as float: \"$(i)\"")
-    end
-end
 
 function Base.tryparse(::Type{FlagSet}, x::String)
     Iterators.map(eachsplit(x, ',')) do str
@@ -58,6 +53,20 @@ function mkdir_checked(path::String, exists_ok::Bool)
     return mkdir(path)
 end
 
+struct Thresholds
+    x::Union{Vector{Float64}, Nothing}
+end
+
+const default_thresholds = Thresholds(nothing)
+
+function Base.tryparse(::Type{Thresholds}, s::String)
+    v = map(eachsplit(s, ',')) do i
+        @something tryparse(Float64, i) exitwith("Cannot parse as float: \"$(i)\"")
+    end
+    return Thresholds(v)
+end
+
+
 """
 # Intro
 Benchmark a set of bins agains a reference
@@ -90,8 +99,8 @@ Comonicon.@cast function bench(
         minseqs::Int = 1,
         keep_flags::FlagSet = FlagSet(),
         remove_flags::FlagSet = FlagSet(),
-        recalls::Union{Nothing, Vector{Float64}} = nothing,
-        precisions::Union{Nothing, Vector{Float64}} = nothing,
+        recalls::Thresholds = default_thresholds,
+        precisions::Thresholds = default_thresholds,
         intersect::Bool = false,
         quiet::Bool = false,
     )
@@ -128,7 +137,7 @@ Comonicon.@cast function bench(
     set_global_logger!(joinpath(outdir, "log.txt"); quiet)
     start_info()
     @info "Running subcommand `bench`"
-    settings = OutputSettings(recalls, precisions)
+    settings = OutputSettings(recalls.x, precisions.x)
     @info "Loading reference"
     refdata = open(read, ref)
     reference = Reference(IOBuffer(refdata))
