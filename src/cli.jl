@@ -6,13 +6,22 @@
 const DEFAULT_RECALLS = [0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
 const DEFAULT_PRECISIONS = [0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
 
-# TODO: This Base piracy is shady as fuck
-Base.tryparse(::Type{Union{Nothing, String}}, x::String) = x
+struct MaybeString
+    x::Union{String, Nothing}
+end
 
-function Base.tryparse(::Type{FlagSet}, x::String)
-    Iterators.map(eachsplit(x, ',')) do str
+const nostring = MaybeString(nothing)
+
+Base.tryparse(::Type{MaybeString}, x::AbstractString) = MaybeString(String(x)::String)
+
+struct FlagSetString
+    x::FlagSet
+end
+
+function Base.tryparse(::Type{FlagSetString}, x::AbstractString)
+    return Iterators.map(eachsplit(String(x)::String, ',')) do str
         @something tryparse(Flag, str) parse_flag_error(str)
-    end |> FlagSet
+    end |> FlagSet |> FlagSetString
 end
 
 function parse_flag_error(s::AbstractString)
@@ -59,8 +68,8 @@ end
 
 const default_thresholds = Thresholds(nothing)
 
-function Base.tryparse(::Type{Thresholds}, s::String)
-    v = map(eachsplit(s, ',')) do i
+function Base.tryparse(::Type{Thresholds}, s::AbstractString)
+    v = map(eachsplit(String(s)::String, ',')) do i
         @something tryparse(Float64, i) exitwith("Cannot parse as float: \"$(i)\"")
     end
     return Thresholds(v)
@@ -94,22 +103,23 @@ Comonicon.@cast function bench(
         outdir::String,
         ref::String,
         bins...; # name=path strings, or a single path
-        sep::Union{String, Nothing} = nothing,
+        sep::MaybeString = nostring,
         minsize::Int = 1,
         minseqs::Int = 1,
-        keep_flags::FlagSet = FlagSet(),
-        remove_flags::FlagSet = FlagSet(),
+        keep_flags::FlagSetString = FlagSetString(FlagSet()),
+        remove_flags::FlagSetString = FlagSetString(FlagSet()),
         recalls::Thresholds = default_thresholds,
         precisions::Thresholds = default_thresholds,
         intersect::Bool = false,
         quiet::Bool = false,
     )
+    length(bins) == 0 && exitwith("Must pass at least one path to bins, got zero")
     set_global_logger!(; quiet)
     @debug "Checking validity of input paths"
     pairs::Union{String, Vector{Pair{String, String}}} = if length(bins) == 1
         check_file(only(bins), "Binning file")
     else
-        v = map(collect(bins)) do i
+        v = map(collect(bins)::Vector{String}) do i
             p = split(i, '='; limit = 2)
             length(p) == 1 && exitwith(
                 "If multiple bins files is passed, pass them as e.g. bin1=path_to_bin1.tsv bin2=path_to_bin2.tsv",
@@ -155,14 +165,14 @@ Comonicon.@cast function bench(
         binnings[i] = Binning(
             path,
             reference;
-            binsplit_separator = sep,
+            binsplit_separator = sep.x,
             min_size = minsize,
             min_seqs = minseqs,
             disjoint = !intersect,
             recalls = settings.recalls,
             precisions = settings.precisions,
             filter_genomes = g ->
-            isdisjoint(flags(g), remove_flags) && issubset(keep_flags, flags(g)),
+            isdisjoint(flags(g), remove_flags.x) && issubset(keep_flags.x, flags(g)),
         )
     end
     @debug "Done loading binnings"
@@ -316,26 +326,26 @@ Create a new reference JSON file. See more details in the documentation.
 Comonicon.@cast function makeref(
         outdir::String;
         # Mapping of sequences to genomes (four-column format, see docs)
-        seq_mapping::Union{String, Nothing} = nothing,
+        seq_mapping::MaybeString = nostring,
         # This is for unmapped sequences, so they still appear in reference
-        seq_fasta::Union{String, Nothing} = nothing,
+        seq_fasta::MaybeString = nostring,
         # ... or they can pass in the JSON directly
-        seq_json::Union{String, Nothing} = nothing,
+        seq_json::MaybeString = nostring,
 
         # The special tax file
-        tax::Union{String, Nothing} = nothing,
+        tax::MaybeString = nostring,
         # Path to dump of NCBI - used to parse the `id=412` elements in `tax`
-        tax_ncbi::Union{String, Nothing} = nothing,
+        tax_ncbi::MaybeString = nostring,
         # ... or they can pass in the JSON directly
-        tax_json::Union{String, Nothing} = nothing,
+        tax_json::MaybeString = nostring,
 
         # A string of the format
         # virus+plasmid=/path/to/phasmids,organisms=/path/to/organisms
         # I.e. (flagset, path) pairs comma-sep, with = to delimit the two, and +
         # to delimit flags in the flagset.
-        genome_directories::Union{String, Nothing} = nothing,
+        genome_directories::MaybeString = nostring,
         # ... or they can pass in the JSON directly
-        genome_json::Union{String, Nothing} = nothing,
+        genome_json::MaybeString = nostring,
 
         # Do not error if output directory already exists
         overwrite::Bool = false,
@@ -345,11 +355,11 @@ Comonicon.@cast function makeref(
     )
     set_global_logger!(; quiet)
     @debug "Validating sequence args"
-    seq_args = SeqArgs(; json = seq_json, seq_mapping = seq_mapping, fasta = seq_fasta)
+    seq_args = SeqArgs(; json = seq_json.x, seq_mapping = seq_mapping.x, fasta = seq_fasta.x)
     @debug "Validating genome args"
-    genome_args = GenomeArgs(; json = genome_json, directories = genome_directories)
+    genome_args = GenomeArgs(; json = genome_json.x, directories = genome_directories.x)
     @debug "Validating taxonomy args"
-    tax_args = TaxArgs(; json = tax_json, ncbi = tax_ncbi, tax)
+    tax_args = TaxArgs(; json = tax_json.x, ncbi = tax_ncbi.x, tax = tax.x)
     @debug "All arguments validated"
     outdir = abspath(expanduser(outdir))
     mkdir_checked(outdir, overwrite)
@@ -360,17 +370,17 @@ Comonicon.@cast function makeref(
 
     gns = genomes(genome_args)
     @debug "Writing genomes.json file"
-    isnothing(genome_json) &&
+    isnothing(genome_json.x) &&
         open(io -> JSON3.write(io, gns), joinpath(outdir, "genomes.json"), "w")
 
     taxes = taxonomy(tax_args, gns)
     @debug "Writing taxonomy.json file"
-    isnothing(tax) ||
+    isnothing(tax.x) ||
         open(io -> JSON3.write(io, taxes), joinpath(outdir, "taxonomy.json"), "w")
 
     seqs = sequences(seq_args, gns)
     @debug "Writing seqs.json file"
-    isnothing(seq_json) &&
+    isnothing(seq_json.x) &&
         open(io -> JSON3.write(io, seqs), joinpath(outdir, "seqs.json"), "w")
 
     @info "Constructing Reference object"
