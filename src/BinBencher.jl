@@ -21,7 +21,6 @@ using JSON3: JSON3
 using CodecZlib: GzipDecompressorStream, GzipCompressorStream
 using LoggingExtras: LoggingExtras
 using Logging: Logging, global_logger
-using StyledStrings: @styled_str
 using Dates: Dates
 using .Threads: @threads, @spawn, nthreads
 using CRC32c: crc32c
@@ -52,12 +51,23 @@ function is_binbencher_submodule(mod::Module)
     end
     return true
 end
+function metafmt(level::Logging.LogLevel, _module, group, id, file, line)
+    if level == Logging.Debug
+        return (:blue, "DEBUG", "")
+    elseif level == Logging.Info
+        return (:green, "INFO ", "")
+    elseif level == Logging.Warn
+        return (:yellow, "WARN ", "")
+    elseif level == Logging.Error
+        return (:red, "ERROR", "")
+    else
+        return (:default, "     ", "")
+    end
+end
 
 function set_global_logger!(paths::Vararg{String}; quiet::Bool = false)
-    stderr_sink = LoggingExtras.FormatLogger() do io, args
-        println(io, args.message)
-    end
     stderr_loglevel = quiet ? Logging.Error : Logging.Info
+    stderr_sink = Logging.ConsoleLogger(stderr, stderr_loglevel; meta_formatter=metafmt)
     stderr_sink = LoggingExtras.MinLevelLogger(stderr_sink, stderr_loglevel)
     file_sinks = map(paths) do path
         LoggingExtras.FormatLogger(path) do io, args
@@ -67,23 +77,9 @@ function set_global_logger!(paths::Vararg{String}; quiet::Bool = false)
     sinks = (stderr_sink, file_sinks...)
     logger = LoggingExtras.TeeLogger(sinks...)
     logger = LoggingExtras.TransformerLogger(logger) do log
-        prefix = if log.level == Logging.Debug
-            styled"{blue,bold:DEBUG}"
-        elseif log.level == Logging.Info
-            styled" {green,bold:INFO}"
-        elseif log.level == Logging.Warn
-            styled" {yellow,bold:WARN}"
-        elseif log.level == Logging.Error
-            styled"{red,bold:ERROR}"
-        else
-            "     "
-        end
         merge(
             log,
-            (;
-                message = prefix *
-                    " $(Dates.format(Dates.now(), TIME_FORMAT)) | $(log.message)",
-            ),
+            (;message = "$(Dates.format(Dates.now(), TIME_FORMAT)) | $(log.message)"),
         )
     end
     logger = LoggingExtras.EarlyFilteredLogger(logger) do log
