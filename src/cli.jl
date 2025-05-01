@@ -160,7 +160,8 @@ Comonicon.@cast function bench(
     binnings = Vector{Binning}(undef, length(bin_paths))
     @info "Loading binning(s) from TSV file(s)"
     @debug "Loading with $(nthreads()) threads"
-    @threads :greedy for (i, path) in enumerate(bin_paths)
+    # TODO: This should be :greedy schedule for Julia 1.11 onwards
+    @threads for (i, path) in collect(enumerate(bin_paths))
         @debug "Loading binning at path \"$(path)\""
         binnings[i] = Binning(
             path,
