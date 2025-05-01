@@ -18,11 +18,13 @@ refdir = tempname()
 
 BinBencher.makeref(
     refdir;
-    seq_mapping = joinpath(BB_FILE_DIR, "mapping.tsv"),
-    seq_fasta = joinpath(BB_FILE_DIR, "seq.fasta"),
-    tax = joinpath(BB_FILE_DIR, "tax.tsv"),
-    tax_ncbi = joinpath(BB_FILE_DIR, "ncbi.tsv"),
-    genome_directories = "organism=$(joinpath(BB_FILE_DIR, "organisms")),virus=$(joinpath(BB_FILE_DIR, "virus"))",
+    seq_mapping = BinBencher.MaybeString(joinpath(BB_FILE_DIR, "mapping.tsv")),
+    seq_fasta = BinBencher.MaybeString(joinpath(BB_FILE_DIR, "seq.fasta")),
+    tax = BinBencher.MaybeString(joinpath(BB_FILE_DIR, "tax.tsv")),
+    tax_ncbi = BinBencher.MaybeString(joinpath(BB_FILE_DIR, "ncbi.tsv")),
+    genome_directories = BinBencher.MaybeString(
+        "organism=$(joinpath(BB_FILE_DIR, "organisms")),virus=$(joinpath(BB_FILE_DIR, "virus"))"
+    ),
     quiet = true,
 )
 
