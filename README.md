@@ -10,7 +10,7 @@ Read [the documentation on the BinBencherBackend.jl doc page.](https://jakobniss
 ## Installation of the CLI program
 1. Install the [Julia programming language](https://julialang.org/).
 2. Make sure `julia` is on your `$PATH`, e.g. test it by running `julia -v`
-2. Install BinBencher with the following command:
+3. Install BinBencher with the following command:
 
 ```shell
 julia --startup=no --project=@binbencher -e 'using Pkg; Pkg.add(url="https://github.com/jakobnissen/BinBencher.jl", rev="v0.1.0"); Pkg.precompile(); Pkg.build()'
