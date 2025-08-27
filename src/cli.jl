@@ -155,7 +155,7 @@ Comonicon.@cast function bench(
     @debug "Computing reference CRC32c"
     checksum = crc32c(refdata)
     @info "Reference file CRC32c: $(string(checksum, base = 16))"
-    resize!(refdata, 0) # save memory
+    refdata = nothing # free memory
     bin_paths::Vector{String} = pairs isa String ? [pairs] : last.(pairs)
     binnings = Vector{Binning}(undef, length(bin_paths))
     @info "Loading binning(s) from TSV file(s)"

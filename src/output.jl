@@ -19,7 +19,7 @@ function populate_output(
         binning::BBB.Binning,
         settings::OutputSettings,
     )
-    @debug lazy"Populating output directory at $(dir)"
+    @debug lazy"Populating output directory at $(repr(dir))"
     @debug "Making stats.json"
     open(joinpath(dir, "stats.json"), "w") do json
         output_stats(json, binning)

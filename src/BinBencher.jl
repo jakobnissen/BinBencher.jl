@@ -40,6 +40,7 @@ const TIME_FORMAT = Dates.DateFormat("HH:mm:SS:sss")
 
 function start_info()
     @info "Running BinBencher version v$(VERSION)"
+    @info "CLI arguments are $(repr(join(ARGS, " ")))"
     @info "Date is $(Dates.today())"
     return @debug "Number of threads: $(nthreads())"
 end
@@ -67,7 +68,7 @@ end
 
 function set_global_logger!(paths::Vararg{String}; quiet::Bool = false)
     stderr_loglevel = quiet ? Logging.Error : Logging.Info
-    stderr_sink = Logging.ConsoleLogger(stderr, stderr_loglevel; meta_formatter=metafmt)
+    stderr_sink = Logging.ConsoleLogger(stderr, stderr_loglevel; meta_formatter = metafmt)
     stderr_sink = LoggingExtras.MinLevelLogger(stderr_sink, stderr_loglevel)
     file_sinks = map(paths) do path
         LoggingExtras.FormatLogger(path) do io, args
@@ -79,7 +80,7 @@ function set_global_logger!(paths::Vararg{String}; quiet::Bool = false)
     logger = LoggingExtras.TransformerLogger(logger) do log
         merge(
             log,
-            (;message = "$(Dates.format(Dates.now(), TIME_FORMAT)) | $(log.message)"),
+            (; message = "$(Dates.format(Dates.now(), TIME_FORMAT)) | $(log.message)"),
         )
     end
     logger = LoggingExtras.EarlyFilteredLogger(logger) do log
