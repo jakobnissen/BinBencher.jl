@@ -17,7 +17,7 @@ using BinBencherBackend:
 
 using Comonicon: Comonicon
 using FASTX: FASTA
-using JSON3: JSON3
+using JSON: JSON
 using CodecZlib: GzipDecompressorStream, GzipCompressorStream
 using LoggingExtras: LoggingExtras
 using Logging: Logging, global_logger

@@ -26,7 +26,7 @@ end
 
 function taxonomy(x::@NamedTuple{json::String})
     @info "Loading taxonomy from JSON file at \"$(x.json)\""
-    return open(io -> JSON3.read(io, TAXMAPS_JSON_T), x.json)
+    return open(io -> JSON.parse(io, TAXMAPS_JSON_T), x.json)
 end
 
 function taxonomy(x::@NamedTuple{tax::String, ncbi::Union{Nothing, String}})
@@ -279,7 +279,7 @@ end
 
 function sequences(x::@NamedTuple{json::String}, ::GENOMES_JSON_T)
     @info "Loading sequences from JSON file $(x.json)"
-    return open(io -> JSON3.read(io, SEQUENCES_JSON_T), x.json)
+    return open(io -> JSON.parse(io, SEQUENCES_JSON_T), x.json)
 end
 
 function sequences(
@@ -306,7 +306,7 @@ genomes(x::GenomeArgs)::GENOMES_JSON_T = genomes(x.x)
 # may not know how to set.
 function genomes(x::@NamedTuple{json::String})
     @info lazy"Loading genomes from JSON file $(x.json)"
-    return open(io -> JSON3.read(io, GENOMES_JSON_T), x.json)
+    return open(io -> JSON.parse(io, GENOMES_JSON_T), x.json)
 end
 
 function genomes(directories::Vector{Pair{FlagSet, String}})

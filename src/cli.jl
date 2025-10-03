@@ -372,17 +372,17 @@ Comonicon.@cast function makeref(
     gns = genomes(genome_args)
     @debug "Writing genomes.json file"
     isnothing(genome_json.x) &&
-        open(io -> JSON3.write(io, gns), joinpath(outdir, "genomes.json"), "w")
+        open(io -> JSON.json(io, gns), joinpath(outdir, "genomes.json"), "w")
 
     taxes = taxonomy(tax_args, gns)
     @debug "Writing taxonomy.json file"
     isnothing(tax.x) ||
-        open(io -> JSON3.write(io, taxes), joinpath(outdir, "taxonomy.json"), "w")
+        open(io -> JSON.json(io, taxes), joinpath(outdir, "taxonomy.json"), "w")
 
     seqs = sequences(seq_args, gns)
     @debug "Writing seqs.json file"
     isnothing(seq_json.x) &&
-        open(io -> JSON3.write(io, seqs), joinpath(outdir, "seqs.json"), "w")
+        open(io -> JSON.json(io, seqs), joinpath(outdir, "seqs.json"), "w")
 
     @info "Constructing Reference object"
     @debug "Constructing ReferenceJSON"
