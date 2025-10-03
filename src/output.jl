@@ -34,7 +34,7 @@ function populate_output(
         for bin in binning.bins
             d[bin.name] = json_bin(bin)
         end
-        JSON3.write(json, d)
+        JSON.json(json, d)
     end
 end
 
@@ -43,7 +43,7 @@ function output_stats(io::IO, binning::BBB.Binning)
     d = Dict{String, Any}("n_bins" => BBB.n_bins(b))
     d["n_sequences"] = sum(BBB.n_seqs, binning.bins; init = 0)
     add_mean_bin_stats!(d, b)
-    JSON3.pretty(io, d)
+    JSON.json(io, d; pretty = true)
     return write(io, '\n')
 end
 
@@ -80,7 +80,7 @@ function output_recovery(io::IO, binning::Binning, settings::OutputSettings)
             end
         end
     end
-    return JSON3.write(io, json)
+    return JSON.json(io, json)
 end
 
 function json_bin(bin::BBB.Bin)::Dict{String, Any}
