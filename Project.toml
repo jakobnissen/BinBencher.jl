@@ -7,12 +7,12 @@ authors = ["Jakob Nybo Nissen <jakobnybonissen@gmail.com>"]
 BinBencherBackend = "63a9268e-b9e5-4a07-aba6-1f52d4878f75"
 CRC32c = "8bf52ea8-c179-5cab-976a-9e18b702a9bc"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
-Comonicon = "863f3e99-da2a-4334-8734-de3dacbe5542"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 FASTX = "c2308a5c-f048-11e8-3e8a-31650f418d12"
 JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 LoggingExtras = "e6f89c97-d47a-5376-807f-9c37f3926c36"
+OptParse = "1244ff17-1aa7-4121-9347-f4ead108e58f"
 
 [sources]
 BinBencherBackend = {path = "../BinBencherBackend.jl"}
@@ -21,14 +21,17 @@ BinBencherBackend = {path = "../BinBencherBackend.jl"}
 BinBencherBackend = "0.4.0"
 CRC32c = "1.10.0"
 CodecZlib = "0.7.6"
-Comonicon = "1"
 Dates = "1.10.0"
 FASTX = "2.1.7"
 JSON = "1"
 Logging = "1.10.0"
 LoggingExtras = "1.0.3"
+OptParse = "0.4.3"
 Test = "1.10"
 julia = "1.14"
+
+[apps.binbench]
+julia_flags = ["--threads=8"]
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

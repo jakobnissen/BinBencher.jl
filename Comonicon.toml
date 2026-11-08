@@ -1,4 +1,0 @@
-name = "binbench"
-
-[install]
-nthreads = 8

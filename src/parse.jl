@@ -3,10 +3,10 @@ function tsv_iterator(io::IO, name::AbstractString, header::String)
     lines = enumerate(eachline(io))
     lines = Iterators.filter(i -> !isempty(rstrip(last(i))), lines)
     peeled = Iterators.peel(lines)
-    isnothing(peeled) && exitwith("Found no TSV header when parsing \"$(name)\"")
+    isnothing(peeled) && cli_error("Found no TSV header when parsing \"$(name)\"")
     ((_, obs_header), rest) = peeled
     if rstrip(header) != rstrip(obs_header)
-        exitwith("In $(name), did not find expected header \"$(header)\"")
+        cli_error("In $(name), did not find expected header \"$(header)\"")
     end
     return rest
 end
@@ -53,7 +53,7 @@ function parse_ncbi_taxes(io::IO)::NCBI_DICT_T
     for (lineno, line) in tsv_iterator(io, "NCBI file", NCBI_HEADER)
         stripped = rstrip(line)
         m = match(r"^(\d+)\t(\d+)\t(\d+)\t([^\t\r\n]+)$", stripped)
-        m === nothing && error(
+        m === nothing && cli_error(
             "On line $(lineno), expected line of the form " *
                 "$(raw"^(\d+)\t(\d+)\t(\d+)\t([^\t\r\n]+)$"), " *
                 lazy"but got \"$(stripped)\"",
@@ -77,7 +77,7 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
 
     for (line_number, line) in tsv_iterator(io, "Taxonomy TSV file", TAX_TSV_HEADER)
         fields = split(rstrip(line), '\t')
-        length(fields) == 3 || error(
+        length(fields) == 3 || cli_error(
             lazy"In taxmaps file, on line $(line_number), " *
                 "expected 3 tab-separated fields, got $(length(fields))",
         )
@@ -85,14 +85,14 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
         # For now, we demand that the user uses the classical 7 taxonomic ranks
         # plus 'strain' (the latter for genomes).
         rank = get(RANK_BY_NAME, lowercase(rank_str), 8)
-        rank == 8 && error(
+        rank == 8 && cli_error(
             lazy"In taxmaps file, on line $(line_number), " *
                 lazy"Invalid rank name: \"$(rank_str)\". Valid names are:\n" *
                 lazy"$(join(RANKS[1:end-1], \", \"))",
         )
         if !startswith(parent, "id=")
             existing = get!(result[rank], child, parent)
-            existing == parent || error(
+            existing == parent || cli_error(
                 lazy"In taxmaps file, on line $(line_number), " *
                     lazy"At rank \"$(rank_str)\", child \"$(child)\" has two distinct parents",
             )
@@ -104,18 +104,20 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
             end
         else
             if isnothing(ncbi)
-                error(
+                cli_error(
                     lazy"In tax file, on line $(line_number), the parent is given " *
                         "as an NCBI tax id. However, the NCBI tax file was not provided.",
                 )
             end
-            parent_id = parse(Int, parent[4:end])
+            parent_id = @something tryparse(Int, parent[4:end]) cli_error(
+                lazy"In taxmaps file, on line $(line_number), cannot parse NCBI taxid \"$(parent)\"",
+            )
             # We fill in all ranks, then we trim away the unused ones at the end
             # once we've traversed the whole file and know the highest rank manually
             # given
             for rank in rank:6
                 lookup = get(ncbi, parent_id, nothing)
-                isnothing(lookup) && error(
+                isnothing(lookup) && cli_error(
                     lazy"In taxmaps file, on line $(line_number), " *
                         lazy"NCBI taxid $(parent_id) is not a known NCBI taxid. " *
                         "Please note that we only accept taxids with a rank " *
@@ -123,13 +125,13 @@ function parse_taxmaps(io::IO, ncbi::Union{Nothing, NCBI_DICT_T})::TAXMAPS_JSON_
                         "or manually include the taxonomic levels for child $(child)",
                 ) # we have only the normal ranks (the seven from species to domain)
                 (parent_rank, grandparent_id, parent) = lookup
-                parent_rank == rank + 1 || error(
+                parent_rank == rank + 1 || cli_error(
                     lazy"At rank $(rank_str), NCBI taxid $(parent_id) is listed as a parent. " *
                         lazy"However, the parent of a $(rank_str) must be a $(RANKS[rank+1]), " *
                         "whereas NCBI tax $(parent_id) is a $(RANKS[parent_rank])",
                 )
                 existing = get!(result[rank], child, parent)
-                existing == parent || error(
+                existing == parent || cli_error(
                     lazy"At rank $(RANKS[rank]), child \"$(child)\" is listed " *
                         "with multiple distinct parents.",
                 )
@@ -169,7 +171,7 @@ function parse_sequences_tsv(io::IO)::Vector{BLAST_ROW}
     for (lineno, line) in tsv_iterator(io, "Sequence TSV file", EXPECTED_SEQ_TSV_HEADER)
         fields = split(line, '\t')
         if length(fields) != 4
-            exitwith(
+            cli_error(
                 lazy"On line $(lineno) in sequence TSV file, did not get 4 tab-sep columns",
             )
         end
@@ -177,7 +179,7 @@ function parse_sequences_tsv(io::IO)::Vector{BLAST_ROW}
         sstart = tryparse(Int, start)
         send = tryparse(Int, stop)
         if isnothing(sstart) || isnothing(send)
-            exitwith(
+            cli_error(
                 lazy"On line $(lineno) in sequence TSV files, columns 3 and 4 " *
                     "cannot be parsed to `Int`.",
             )
@@ -200,14 +202,14 @@ function sequences(
     end
     for (; query, subject, sstart, send) in blast
         slen = get(subject_lengths, subject) do
-            exitwith(
+            cli_error(
                 "BLAST file contains subject \"$(subject)\", but this was not found " *
                     "when parsing the genomes. Make sure the BLAST file was created by BLASTing " *
                     "against the genome sequences.",
             )
         end
         (qlen, targets) = get(dict, query) do
-            exitwith(
+            cli_error(
                 "BLAST file contains query \"$(query)\", but this was not found when " *
                     "parsing the sequence FASTA file. Make sure the BLAST file was created " *
                     "using the same sequence FASTA file as query",
@@ -225,7 +227,7 @@ function sequences(
         if stop ≤ slen
             push!(targets, (subject, start, stop))
         else
-            stop > 2 * slen && exitwith(
+            stop > 2 * slen && cli_error(
                 "In BLAST file, a BLAST hit spans $(start)-$(stop) even though " *
                     "subject \"$(subject)\" only has length $(slen).",
             )
@@ -236,7 +238,7 @@ function sequences(
             span_length = length(start:stop)
             qlen > 500 &&
                 span_length > 1.25 * qlen &&
-                exitwith(
+                cli_error(
                 "In BLAST file, query \"$(query)\" has a hit spanning $(start)-$(stop). " *
                     "This is more than 125% of the query length $(qlen), which indicates " *
                     "a bad alignment",
@@ -266,7 +268,7 @@ function parse_sequences_fasta(io::IO)::Vector{Tuple{String, Int}}
             L = length(seen_identifiers)
             push!(seen_identifiers, identifier)
             length(seen_identifiers) == L &&
-                exitwith("Duplicate query name in FASTA file: \"$(identifier)\"")
+                cli_error("Duplicate query name in FASTA file: \"$(identifier)\"")
             (identifier, FASTA.seqsize(record))
         end
     end
@@ -287,14 +289,21 @@ function sequences(
         genomes::GENOMES_JSON_T,
     )
     @info lazy"Loading sequence TSV file from seq mapping $(x.seq_mapping)"
-    a = @spawn open(parse_sequences_tsv, x.seq_mapping)
+    # Exceptions thrown in a task are wrapped in a `TaskFailedException` when fetched,
+    # so we return a `CLIError` from the task, and throw it from this task.
+    a = @spawn try
+        open(parse_sequences_tsv, x.seq_mapping)
+    catch e
+        e isa CLIError ? e : rethrow()
+    end
     @info lazy"Loading FASTA file at $(x.fasta)"
     fasta = open_perhaps_gzipped(parse_sequences_fasta, x.fasta)
-    blast = fetch(a)::Vector{BLAST_ROW}
+    blast = fetch(a)::Union{Vector{BLAST_ROW}, CLIError}
+    blast isa CLIError && throw(blast)
     subject_lengths = Dict{String, Int}()
     for (_, _, subjects) in genomes, (subject, len) in subjects
         haskey(subject_lengths, subject) &&
-            exitwith("Duplicate subject name in genomes: \"$(subject)\"")
+            cli_error("Duplicate subject name in genomes: \"$(subject)\"")
         subject_lengths[subject] = len
     end
     return sequences(blast, fasta, subject_lengths)

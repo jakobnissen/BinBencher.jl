@@ -18,7 +18,7 @@ using BinBencherBackend:
     RANK_BY_NAME,
     RANKS
 
-using Comonicon: Comonicon
+using OptParse: OptParse, @parser, arg, command, default, flag, help, integer, lift, many1, option, optional, optparse, or, print_help, str
 using FASTX: FASTA
 using JSON: JSON
 using CodecZlib: GzipDecompressorStream, GzipCompressorStream
@@ -52,6 +52,7 @@ function is_binbencher_submodule(mod::Module)
     while mod !== BinBencher
         parent = parentmodule(mod)
         parent === mod && return false
+        mod = parent
     end
     return true
 end
@@ -97,7 +98,6 @@ end
 include("output.jl")
 include("cli.jl")
 include("parse.jl")
-
-Comonicon.@main
+include("main.jl")
 
 end # module BinBencher

@@ -8,17 +8,18 @@ For more customised, flexible analysis of binnings, it may be preferred to use t
 Read [the documentation on the BinBencherBackend.jl doc page.](https://jakobnissen.github.io/BinBencherBackend.jl/dev)
 
 ## Installation of the CLI program
-1. Install the [Julia programming language](https://julialang.org/).
+1. Install the [Julia programming language](https://julialang.org/), version 1.14 or newer.
 2. Make sure `julia` is on your `$PATH`, e.g. test it by running `julia -v`
-3. Install BinBencher with the following command:
+3. Install BinBencher as a Julia app with the following command:
 
 ```shell
-julia --startup=no --project=@binbencher -e 'using Pkg; Pkg.add(url="https://github.com/jakobnissen/BinBencher.jl", rev="v0.1.0"); Pkg.precompile(); Pkg.build()'
+julia --startup=no -e 'using Pkg; Pkg.Apps.add(url="https://github.com/jakobnissen/BinBencher.jl")'
 ```
 
-You will now have an executable script called `binbench` in the `bin` subdirectory your Julia home directory.
-For example, on my computer the script is at `~/.julia/bin/binbench`.
+You will now have an executable called `binbench` in the `bin` subdirectory your Julia home directory.
+For example, on my computer the executable is at `~/.julia/bin/binbench`.
 Add the `bin` folder to your `$PATH` environmental variable to be able run to BinBencher as `binbench` from the shell.
+Run `binbench --help` to see the available subcommands.
 
 ## Running on example files
 1. Go to [the releases page](https://github.com/jakobnissen/BinBencher.jl/releases/tag/filesv1) and download the file `inputs.tar.gz`.
