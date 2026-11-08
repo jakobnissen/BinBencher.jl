@@ -36,6 +36,19 @@ function exitwith(s::AbstractString)
     return exit(1)
 end
 
+# The backend throws a `BinBencherException` when its input is invalid.
+# Report the expected exception type `T` as an error message instead of crashing
+# with a stacktrace. Other exceptions are rethrown, so that new exception types
+# in the backend are noticed and handled deliberately.
+function exit_on_input_error(f, ::Type{T}, description::AbstractString) where {T <: BinBencherException}
+    return try
+        f()
+    catch e
+        e isa T || rethrow()
+        exitwith("Invalid $(description): $(sprint(showerror, e))")
+    end
+end
+
 function check_file(s::AbstractString, name::AbstractString)
     @debug lazy"Checking existence of file \"$(s)\""
     return isfile(s) ? s : exitwith("$(name) does not point to an existing file: \"$(s)\"")
@@ -150,7 +163,9 @@ Comonicon.@cast function bench(
     settings = OutputSettings(recalls.x, precisions.x)
     @info "Loading reference"
     refdata = open(read, ref)
-    reference = Reference(IOBuffer(refdata))
+    reference = exit_on_input_error(ReferenceError, "reference file \"$(ref)\"") do
+        Reference(IOBuffer(refdata))
+    end
     @debug "Reference loaded"
     @debug "Computing reference CRC32c"
     checksum = crc32c(refdata)
@@ -158,23 +173,32 @@ Comonicon.@cast function bench(
     refdata = nothing # free memory
     bin_paths::Vector{String} = pairs isa String ? [pairs] : last.(pairs)
     binnings = Vector{Binning}(undef, length(bin_paths))
+    # We can't exit from within the threaded loop, so we store errors and check them after
+    errors = Vector{Union{Nothing, BinningError}}(nothing, length(bin_paths))
     @info "Loading binning(s) from TSV file(s)"
     @debug "Loading with $(nthreads()) threads"
-    # TODO: This should be :greedy schedule for Julia 1.11 onwards
-    @threads for (i, path) in collect(enumerate(bin_paths))
+    @threads :greedy for (i, path) in collect(enumerate(bin_paths))
         @debug "Loading binning at path \"$(path)\""
-        binnings[i] = Binning(
-            path,
-            reference;
-            binsplit_separator = sep.x,
-            min_size = minsize,
-            min_seqs = minseqs,
-            disjoint = !intersect,
-            recalls = settings.recalls,
-            precisions = settings.precisions,
-            filter_genomes = g ->
-            isdisjoint(flags(g), remove_flags.x) && issubset(keep_flags.x, flags(g)),
-        )
+        try
+            binnings[i] = Binning(
+                path,
+                reference;
+                binsplit_separator = sep.x,
+                min_size = minsize,
+                min_seqs = minseqs,
+                disjoint = !intersect,
+                recalls = settings.recalls,
+                precisions = settings.precisions,
+                filter_genomes = g ->
+                isdisjoint(flags(g), remove_flags.x) && issubset(keep_flags.x, flags(g)),
+            )
+        catch e
+            e isa BinningError || rethrow()
+            errors[i] = e
+        end
+    end
+    for (path, e) in zip(bin_paths, errors)
+        isnothing(e) || exitwith("Invalid binning file \"$(path)\": $(sprint(showerror, e))")
     end
     @debug "Done loading binnings"
     if pairs isa String
@@ -388,7 +412,9 @@ Comonicon.@cast function makeref(
     @debug "Constructing ReferenceJSON"
     json_struct = BBB.ReferenceJSON(BBB.JSON_VERSION, gns, seqs, taxes)
     @debug "Constructing Reference from ReferenceJSON"
-    ref = Reference(json_struct)
+    ref = exit_on_input_error(ReferenceError, "reference") do
+        Reference(json_struct)
+    end
     @debug "Writing reference object"
     open(joinpath(outdir, "reference.json"), "w") do io
         BBB.save(io, ref)

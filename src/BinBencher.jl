@@ -2,6 +2,9 @@ module BinBencher
 
 using BinBencherBackend:
     BinBencherBackend,
+    BinBencherException,
+    ReferenceError,
+    BinningError,
     FlagSet,
     Reference,
     Binning,
