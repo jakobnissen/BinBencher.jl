@@ -18,7 +18,7 @@ using BinBencherBackend:
     RANK_BY_NAME,
     RANKS
 
-using OptParse: OptParse, @parser, arg, command, default, flag, help, integer, lift, many1, option, optional, optparse, or, print_help, str
+using OptParse: OptParse, @parser, arg, command, default, flag, help, integer, generate_help, lift, many1, option, optional, optparse, or, str
 using FASTX: FASTA
 using JSON: JSON
 using CodecZlib: GzipDecompressorStream, GzipCompressorStream
@@ -27,6 +27,7 @@ using Logging: Logging, global_logger
 using Dates: Dates
 using .Threads: @threads, @spawn, nthreads
 using CRC32c: crc32c
+using PrecompileTools: @setup_workload, @compile_workload
 
 const VERSION = let
     toml_path = joinpath(dirname(dirname(@__FILE__)), "Project.toml")
@@ -99,5 +100,6 @@ include("output.jl")
 include("cli.jl")
 include("parse.jl")
 include("main.jl")
+include("precompile.jl")
 
 end # module BinBencher

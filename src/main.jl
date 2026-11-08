@@ -94,6 +94,14 @@ function run_command(x::MakerefArgs)
     )
 end
 
+# The help text is generated as a `String`, and then printed. That way, the precompile
+# workload can compile the generation of help, which is the expensive part, without
+# printing to `Core.stdout`.
+function print_cli_help(io::IO, argv::Vector{String})
+    print(io, generate_help(CLI, argv; progname = PROGNAME))
+    return nothing
+end
+
 """
     main(args::Vector{String})::Cint
 
@@ -102,7 +110,7 @@ Entry point of the `binbench` executable. Return the exit code: 0 on success,
 """
 function (@main)(args::Vector{String})::Cint
     if isempty(args)
-        print_help(Core.stderr, CLI, String[]; progname = PROGNAME)
+        print_cli_help(Core.stderr, String[])
         return 2
     end
     # Help and version are handled here, and not by `OptParse.runparse`, since
@@ -111,13 +119,13 @@ function (@main)(args::Vector{String})::Cint
         println(Core.stdout, PROGNAME, " ", VERSION)
         return 0
     elseif args[1] == "help"
-        print_help(Core.stdout, CLI, args[2:end]; progname = PROGNAME)
+        print_cli_help(Core.stdout, args[2:end])
         return 0
     end
     before_terminator = something(findfirst(==("--"), args), lastindex(args) + 1) - 1
     if any(in(("-h", "--help")), view(args, 1:before_terminator))
         subcommand = filter(!in(("-h", "--help")), args[1:before_terminator])
-        print_help(Core.stdout, CLI, subcommand; progname = PROGNAME)
+        print_cli_help(Core.stdout, subcommand)
         return 0
     end
     parsed = optparse(CLI, args; progname = PROGNAME)
