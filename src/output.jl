@@ -99,14 +99,14 @@ function json_bin(bin::BBB.Bin)::Dict{String, Any}
     d = Dict{String, Any}()
     result["clades"] = d
     for (; clade, recall, precision) in
-        BBB.recalls_precisions(BBB.Clade{BBB.Genome}, bin; assembly = false) # TODO: Also merge two loops here. Perhaps change API
+        BBB.recalls_precisions(BBB.Clade, bin; assembly = false) # TODO: Also merge two loops here. Perhaps change API
         d[clade.name] = Dict(
             "genomic_recall" => round(recall; digits = 5),
             "precision" => round(precision; digits = 5),
         )
     end
     for (; clade, recall) in
-        BBB.recalls_precisions(BBB.Clade{BBB.Genome}, bin; assembly = true)
+        BBB.recalls_precisions(BBB.Clade, bin; assembly = true)
         d[clade.name]["asm_recall"] = round(recall; digits = 5)
     end
     return result

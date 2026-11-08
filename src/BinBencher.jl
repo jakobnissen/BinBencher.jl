@@ -2,6 +2,9 @@ module BinBencher
 
 using BinBencherBackend:
     BinBencherBackend,
+    BinBencherException,
+    ReferenceError,
+    BinningError,
     FlagSet,
     Reference,
     Binning,
@@ -15,7 +18,7 @@ using BinBencherBackend:
     RANK_BY_NAME,
     RANKS
 
-using Comonicon: Comonicon
+using OptParse: OptParse, @parser, arg, command, default, flag, help, integer, generate_help, lift, many1, option, optional, optparse, or, str
 using FASTX: FASTA
 using JSON: JSON
 using CodecZlib: GzipDecompressorStream, GzipCompressorStream
@@ -24,6 +27,7 @@ using Logging: Logging, global_logger
 using Dates: Dates
 using .Threads: @threads, @spawn, nthreads
 using CRC32c: crc32c
+using PrecompileTools: @setup_workload, @compile_workload
 
 const VERSION = let
     toml_path = joinpath(dirname(dirname(@__FILE__)), "Project.toml")
@@ -49,6 +53,7 @@ function is_binbencher_submodule(mod::Module)
     while mod !== BinBencher
         parent = parentmodule(mod)
         parent === mod && return false
+        mod = parent
     end
     return true
 end
@@ -94,7 +99,7 @@ end
 include("output.jl")
 include("cli.jl")
 include("parse.jl")
-
-Comonicon.@main
+include("main.jl")
+include("precompile.jl")
 
 end # module BinBencher
